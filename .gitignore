@@ -1,0 +1,21 @@
+# Go build outputs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Test and coverage artifacts
+coverage/
+*.coverprofile
+*.prof
+*.pprof
+
+# Local build directories
+/bin/
+/dist/
+
+# macOS
+.DS_Store
