@@ -6,6 +6,9 @@ import (
 	"testing"
 )
 
+// TestBuildCourtDirectoryPrintsTree는 ParentCourtID로 법원 트리를 만들어, 최상위 법원이 대법원 하나뿐이고
+// 모든 법원이 순환 없이 한 번씩 트리에 나타나는지 확인합니다.
+// go test -v로 실행하면 재판부까지 포함한 전국 법원 구조를 트리 형태로 출력하므로 데이터를 눈으로 검토할 때 씁니다.
 func TestBuildCourtDirectoryPrintsTree(t *testing.T) {
 	courts := buildCourtDirectory()
 	childrenByParent := make(map[string][]Court)
@@ -31,16 +34,8 @@ func TestBuildCourtDirectoryPrintsTree(t *testing.T) {
 		if isLast {
 			connector = "└── "
 		}
-		lines = append(lines, fmt.Sprintf("%s%s재판부: %s [%s] 소재지: %s",
-			prefix, connector, panel.Name, panel.Type, panel.Seat))
-
-		childPrefix := prefix + "│   "
-		if isLast {
-			childPrefix = prefix + "    "
-		}
-		for i, child := range panel.Panels {
-			addPanel(child, childPrefix, i == len(panel.Panels)-1)
-		}
+		lines = append(lines, fmt.Sprintf("%s%s재판부: %s 소재지: %s",
+			prefix, connector, panel.Name, panel.Seat))
 	}
 
 	var addCourt func(court Court, prefix string, isLast, isRoot bool)
