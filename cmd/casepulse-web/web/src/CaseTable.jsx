@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import CategoryBadge from "./CategoryBadge.jsx";
 import { namesSummary, roleGroup, splitParties } from "./cases.js";
+import { MOD_KEY } from "./keyboard.js";
 
 // 처음에 그리는 행 수이자, 목록 끝에 닿을 때마다 더 그리는 행 수입니다.
 const BATCH_SIZE = 50;
@@ -85,7 +86,9 @@ function SortHead({ id, label, sort, onSort, className }) {
 //
 // rows는 검색·필터·정렬을 마친 전체 목록입니다. 데이터는 이미 모두 받아 두었으므로
 // 서버에 다시 요청하지 않고, 한 번에 그리는 행 수만 늘려 화면이 무거워지지 않게 합니다.
-export default function CaseTable({ rows, sort, onSort, selectedId, onSelect }) {
+//   - onSelect(사건): 한 번 클릭. 오른쪽 상세 패널로 빠르게 봅니다.
+//   - onOpen(사건): 더블클릭 또는 Ctrl/Cmd+클릭. 사건 탭(전체 화면)으로 엽니다.
+export default function CaseTable({ rows, sort, onSort, selectedId, onSelect, onOpen }) {
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const scrollRef = useRef(null);
   const sentinelRef = useRef(null);
@@ -135,9 +138,14 @@ export default function CaseTable({ rows, sort, onSort, selectedId, onSelect }) 
               return (
                 <TableRow
                   key={c.id}
-                  onClick={() => onSelect(c)}
+                  title={`클릭: 미리보기 · 더블클릭 또는 ${MOD_KEY}+클릭: 탭으로 열기`}
+                  onClick={(e) => (e.ctrlKey || e.metaKey ? onOpen(c) : onSelect(c))}
+                  onDoubleClick={() => {
+                    window.getSelection()?.removeAllRanges(); // 더블클릭으로 잡힌 글자 선택을 지웁니다.
+                    onOpen(c);
+                  }}
                   data-state={selectedId === c.id ? "selected" : undefined}
-                  className="cursor-pointer"
+                  className="cursor-pointer select-none"
                 >
                   <TableCell className="font-mono tabular-nums">{c.number}</TableCell>
                   <TableCell>

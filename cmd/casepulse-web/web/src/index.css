@@ -6,6 +6,8 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+    /* 앱 본문 바탕색(bg-surface). 선택된 탭도 이 색을 써서 탭과 본문이 한 장처럼 이어 보이게 합니다. */
+    --color-surface: color-mix(in oklch, var(--muted) 45%, var(--background));
     --font-heading: var(--font-sans);
     /* Geist에는 한글 글꼴이 없으므로 한글은 운영체제 기본 글꼴(애플 SD 고딕 Neo, 맑은 고딕)로 이어집니다. */
     --font-sans: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
