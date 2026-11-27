@@ -72,7 +72,11 @@ func newTestServices(t *testing.T) ([]*leviathanv1.Court, *leviathangrpc.Client,
 		}
 	}
 	clioServer := grpc.NewServer()
-	cliogrpcserver.RegisterServer(clioServer, clio.NewStore(clio.BuildDummyCases(courtData), courtData))
+	store := clio.NewStore(clio.NewMemoryRepository(), courtData)
+	if _, err := store.SeedIfEmpty(context.Background(), clio.BuildDummyCases(courtData)); err != nil {
+		t.Fatal(err)
+	}
+	cliogrpcserver.RegisterServer(clioServer, store)
 	healthcheck.RegisterGRPC(clioServer)
 	go clioServer.Serve(clioListener)
 	clioConn, err := grpc.NewClient(clioListener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))

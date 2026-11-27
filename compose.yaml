@@ -6,7 +6,7 @@ x-healthcheck: &healthcheck
   start_interval: 1s
 
 services:
-  # 개발용 PostgreSQL입니다. 아직 Clio는 이 DB를 사용하지 않습니다.
+  # 개발용 PostgreSQL입니다. Clio가 사건 저장소로 사용합니다.
   postgres:
     image: postgres:19-alpine
     environment:
@@ -39,8 +39,11 @@ services:
       dockerfile: cmd/clio/Dockerfile
     environment:
       LEVIATHAN_GRPC_ADDR: leviathan:9090
+      DATABASE_URL: postgres://${POSTGRES_USER:-casepulse}:${POSTGRES_PASSWORD:-casepulse}@postgres:5432/${POSTGRES_DB:-casepulse}?sslmode=disable
     depends_on:
       leviathan:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     expose:
       - "9091"

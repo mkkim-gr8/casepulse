@@ -7,7 +7,7 @@
 | 서비스 | 책임과 데이터 소유권 | 기본 주소 |
 |---|---|---|
 | **Aegis** | React 화면과 HTTP API. 사건 요청은 Clio에, 법원 선택 목록은 Leviathan에 gRPC로 전달합니다. | HTTP `:8080` |
-| **Clio** | 사건 자료형·검증·메모리 저장소를 소유하고 사건 gRPC API를 제공합니다. 시작할 때 법원 목록을 Leviathan에서 받아 검증에 사용합니다. | gRPC `:9091` |
+| **Clio** | 사건 자료형·검증·저장소(PostgreSQL, DB 주소가 없으면 메모리)를 소유하고 사건 gRPC API를 제공합니다. 시작할 때 법원 목록을 Leviathan에서 받아 검증에 사용합니다. | gRPC `:9091` |
 | **Leviathan** | 법원·공소청·중대범죄수사청의 정적 기관 자료와 주소를 소유하고 조회 gRPC API를 제공합니다. | gRPC `:9090` |
 
 Aegis는 Clio나 Leviathan의 도메인 패키지를 직접 사용하지 않고 gRPC 계약으로만 통신합니다. 실행 파일마다 서버 어댑터와 클라이언트 어댑터도 분리되어 있습니다. Docker Compose에서는 Aegis의 HTTP 포트 `8080`만 호스트에 공개하고 gRPC 포트는 내부 네트워크에서만 사용합니다. 각 컨테이너는 실행 파일의 `-healthcheck` 옵션으로 상태를 보고하며, Clio는 Leviathan이, Aegis는 두 서비스가 healthy가 된 뒤에 시작합니다.
@@ -29,7 +29,9 @@ docker compose up -d --build --wait
 | 파일 | 내용 |
 |---|---|
 | `internal/leviathan/` | 법원·공소청·중대범죄수사청 자료형, 목록, 주소 및 재판부 데이터 |
-| `internal/clio/` | 사건 자료형·검증, 메모리 저장소, 초기 더미 데이터 |
+| `internal/clio/` | 사건 자료형·검증, 저장소 계약과 메모리 저장소, 초기 더미 데이터 |
+| `internal/clio/postgres/` | 사건 PostgreSQL 저장소와 스키마 마이그레이션(`migrations/`, goose) |
+| `internal/clio/repotest/` | 메모리·PostgreSQL 저장소가 같은 방식으로 동작하는지 확인하는 공통 테스트 |
 | `cmd/aegis/` | 사건목록 조회·등록 HTTP API와 웹 서버 |
 | `cmd/clio/` | 사건 gRPC 서비스 |
 | `cmd/leviathan/` | 기관 디렉터리를 제공하는 gRPC 서비스 |
@@ -48,7 +50,7 @@ Leviathan의 기관 목록은 패키지가 로드될 때 한 번 만들어지며
 
 ## 개발용 PostgreSQL
 
-앞으로 사건 데이터를 저장할 개발용 PostgreSQL 19를 Compose의 `postgres` 서비스로 제공합니다. 아직 Clio는 이 DB를 사용하지 않고 메모리 저장소를 씁니다.
+사건 데이터를 저장하는 개발용 PostgreSQL 19를 Compose의 `postgres` 서비스로 제공합니다. Compose의 Clio는 `DATABASE_URL`로 이 DB에 연결하며, 시작할 때 스키마 마이그레이션을 적용하고 사건이 하나도 없으면 더미 사건 240건을 넣습니다.
 
 ```sh
 docker compose up -d --wait postgres   # DB만 실행
@@ -62,7 +64,9 @@ docker compose exec postgres psql -U casepulse -d casepulse
 | 접속 URL | `postgres://casepulse:casepulse@localhost:5432/casepulse?sslmode=disable` |
 | Compose 내부 주소 | `postgres:5432` |
 
-기본값은 개발용입니다. 바꾸려면 `.env.example`을 `.env`로 복사해 수정합니다. `.env`는 Git에 올리지 않습니다. 데이터는 이름 있는 볼륨 `postgres-data`에 저장되므로 `docker compose down`으로 컨테이너를 지워도 남습니다. DB를 처음 상태로 되돌리려면 `docker compose down -v`로 볼륨까지 지웁니다. 사용자와 비밀번호는 볼륨을 처음 만들 때만 적용되므로, `.env`의 값을 바꾼 뒤에도 볼륨을 지워야 반영됩니다.
+기본값은 개발용입니다. 바꾸려면 `.env.example`을 `.env`로 복사해 수정합니다. `.env`는 Git에 올리지 않습니다. 데이터는 이름 있는 볼륨 `postgres-data`에 저장되므로 `docker compose down`으로 컨테이너를 지워도 남습니다. DB를 처음 상태로 되돌리려면 `docker compose down -v`로 볼륨까지 지웁니다. 사용자와 비밀번호는 볼륨을 처음 만들 때만 적용되므로, `.env`의 값을 바꾼 뒤에도 볼륨을 지워야 반영됩니다. 비밀번호는 Clio의 접속 URL에 그대로 들어가므로 `@`, `/`, `:` 같은 문자는 쓰지 않습니다.
+
+스키마는 [`internal/clio/postgres/migrations`](internal/clio/postgres/migrations)의 SQL 파일로 관리하며 실행 파일에 포함됩니다. 스키마를 바꿀 때는 기존 파일을 고치지 않고 다음 번호의 파일(예: `00002_...sql`)을 추가합니다. 사건 ID는 PostgreSQL의 `uuidv7()`로 만듭니다.
 
 ## 법원 정보
 
@@ -90,7 +94,7 @@ docker compose exec postgres psql -U casepulse -d casepulse
 - **의뢰인**(`Party.Client`): 당사자마다 의뢰인 여부를 표시합니다. 같은 지위의 당사자가 여럿이어도 일부만 의뢰인일 수 있으므로(예: 원고 3명 중 원고1·원고3) 지위 단위가 아니라 사람 단위로 표시하며, 사건마다 의뢰인이 한 명 이상 있어야 합니다. 또한 지위가 다른 당사자를 함께 대리하면 이해충돌이 생기므로 의뢰인은 모두 같은 지위여야 합니다. 같은 지위인지는 `PartySide`로 판단하며 번호·괄호 표기·띄어쓰기는 무시한다(`원고1`·`원고3` → 원고, `피고(반소원고)` → 피고). `Case.Clients()`로 의뢰인만 꺼낼 수 있습니다.
 - **계속 법원·재판부**(`CourtAssignment`): Leviathan 서비스가 발급한 법원 ID와 그 법원에 속한 재판부 이름. 형사사건을 포함한 모든 사건에 필수입니다. 재판부 ID는 구성표 개정 때 다시 매겨질 수 있으므로 사건에는 재판부 이름을 저장합니다. `Case.Validate()`는 두 값의 필수 여부를 검사하고, 존재·소속 검증은 Clio가 Leviathan의 법원 디렉터리로 수행합니다.
 
-Clio는 시작할 때 Leviathan에서 법원 디렉터리를 gRPC로 받아 사건의 법원·재판부 소속을 확인합니다. 사건 저장소는 현재 메모리 기반이므로 Clio를 재시작하면 등록 사건은 사라집니다.
+Clio는 시작할 때 Leviathan에서 법원 디렉터리를 gRPC로 받아 사건의 법원·재판부 소속을 확인합니다. `DATABASE_URL`이 있으면 사건을 PostgreSQL에 저장하므로 Clio를 재시작해도 남습니다. 비어 있으면 메모리 저장소를 쓰며, 이때는 재시작하면 등록 사건이 사라집니다.
 
 ## Aegis 웹 서비스
 
@@ -130,8 +134,8 @@ docker compose up -d --build --wait
 
 화면을 개발할 때는 Go 서버를 켜 둔 채 저장소 최상위 `web/`에서 `npm run dev`를 실행합니다. Vite 개발 서버(http://localhost:5173)가 고친 내용을 바로 반영하고 `/api` 요청은 Go 서버로 넘깁니다.
 
-- **데이터**: 아직 데이터베이스가 없으므로 [`internal/clio/dummy.go`](internal/clio/dummy.go)가 Leviathan에서 받은 법원 목록으로 고정 시드 더미 사건 240건을 만듭니다. 당사자·사건번호는 지어낸 값이며, 법원·재판부는 사건 종류에 맞는 항목에서 고릅니다.
-- **API**: `GET /api/cases`(전체 목록), `GET /api/cases/{id}`(한 건), `POST /api/cases`(사건 등록), `GET /api/courts`(등록 화면용 법원·재판부 목록), `GET /healthz`(상태 확인). 웹 API는 사건 조회·등록을 Clio gRPC로 전달하고, 법원 목록은 Leviathan에서 받아 응답합니다. 사건은 법원 이름·소재지·주소를 붙인 JSON으로 돌려줍니다. 검증 오류는 400과 함께 오류 메시지 목록을, 같은 법원에 같은 사건번호가 있으면 409를 돌려줍니다. 사건은 Clio 메모리에만 저장되므로 Clio를 다시 시작하면 사라집니다.
+- **데이터**: 저장소가 비어 있으면 [`internal/clio/dummy.go`](internal/clio/dummy.go)가 Leviathan에서 받은 법원 목록으로 고정 시드 더미 사건 240건을 만들어 넣습니다(`CLIO_SEED_DUMMY=false`로 끌 수 있습니다). 당사자·사건번호는 지어낸 값이며, 법원·재판부는 사건 종류에 맞는 항목에서 고릅니다.
+- **API**: `GET /api/cases`(전체 목록), `GET /api/cases/{id}`(한 건), `POST /api/cases`(사건 등록), `GET /api/courts`(등록 화면용 법원·재판부 목록), `GET /healthz`(상태 확인). 웹 API는 사건 조회·등록을 Clio gRPC로 전달하고, 법원 목록은 Leviathan에서 받아 응답합니다. 사건은 법원 이름·소재지·주소를 붙인 JSON으로 돌려줍니다. 검증 오류는 400과 함께 오류 메시지 목록을, 같은 법원에 같은 사건번호가 있으면 409를 돌려줍니다. Clio의 저장소를 쓸 수 없으면(DB 중단 등) 503을 돌려줍니다.
 - **화면**: 저장소 최상위 [`web/`](web)의 React(JSX, TypeScript 없음) 앱이며 Vite로 빌드합니다. UI는 [shadcn/ui](https://ui.shadcn.com)(Radix 기반, Nova 프리셋)와 Tailwind CSS v4로 만들고, [Vite 설치 안내](https://ui.shadcn.com/docs/installation/vite)를 따르되 TypeScript 대신 JavaScript 방식(`components.json`의 `tsx: false`, `jsconfig.json`의 `@/` 별칭)을 씁니다. 컴포넌트는 `npx shadcn@latest add <이름>`으로 `src/components/ui/`에 추가하며, 화면 테마(밝은 화면·어두운 화면·시스템 설정)는 shadcn 다크 모드 안내의 ThemeProvider 방식을 따릅니다. 빌드 결과물 `web/dist`는 git에 올리지 않고 Go 실행 파일에 포함합니다. `web`의 Go 패키지가 이 디렉터리를 `embed`하고, `cmd/aegis`가 이를 서버 화면으로 제공합니다. 로고와 파비콘은 저장소 맨 위 [`casepulse-logo/`](casepulse-logo) 폴더가 원본이며, Vite가 이 폴더를 사이트 루트(`/favicon.ico`, `/casepulse-logo.svg` 등)로 그대로 내보냅니다. 메뉴줄 로고는 밝은 화면에서 `casepulse-logo.svg`, 어두운 화면에서 `casepulse-logo-dark.svg`를 씁니다. 빌드하지 않고 서버를 켜면 `/`에 빌드 안내가 나오고 API는 그대로 동작합니다.
 - **기능**: 사건번호·사건명·당사자·법원·재판부 통합 검색(`/` 키로 이동), 사건 종류·접수 연도·계속 법원 필터, 의뢰인·다른 당사자 구분 표시, 열 정렬, 무한 스크롤(50건씩 이어서 표시), 사건 보기(한 번 클릭은 오른쪽 상세 패널로 미리보기, 더블클릭·⌘/Ctrl+클릭·패널의 `탭으로 열기` 버튼은 사건 탭으로 전체 화면 보기, 같은 사건은 탭 하나만 열림), 어두운 화면.
 - **신건등록**: 메뉴줄의 `신건등록` 버튼, 사건목록 왼쪽 독바의 신건등록 아이콘, `N` 키로 등록 탭을 새로 연다(독바에는 필터 아이콘도 있습니다). 여러 건을 동시에 작성할 수 있고, 탭을 옮겨도 입력 내용이 남습니다. 사건번호 칸에 `2026가합12345`를 붙여 넣으면 연도·사건부호·일련번호로 나뉘어 들어가고, 당사자마다 의뢰인 여부를 체크하며, 법원·재판부는 이름으로 검색해 고른다(재판부 정보가 있는 법원만). `Ctrl+Enter`로 등록하면 탭이 닫히고 사건목록에서 새 사건의 상세 패널이 열립니다. 저장하지 않은 탭을 닫거나 브라우저를 닫으려 하면 확인을 받습니다.
@@ -144,6 +148,14 @@ docker compose up -d --build --wait
 go test ./...
 go vet ./...
 docker compose config -q
+```
+
+PostgreSQL 저장소 통합 테스트는 `CLIO_TEST_DATABASE_URL`이 있을 때만 실행합니다. 테스트마다 임시 DB를 만들고 지우므로 DB를 만들 수 있는 사용자가 필요합니다.
+
+```sh
+docker compose up -d --wait postgres
+CLIO_TEST_DATABASE_URL='postgres://casepulse:casepulse@localhost:5432/casepulse?sslmode=disable' \
+  go test ./internal/clio/postgres
 ```
 
 화면을 빌드하려면 `web/`에서 `npm ci`를 한 번 실행한 뒤 `npm run build`를 실행합니다.

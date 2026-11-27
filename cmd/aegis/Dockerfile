@@ -7,7 +7,7 @@ COPY web/ ./web/
 COPY casepulse-logo/ ./casepulse-logo/
 RUN cd web && npm run build
 
-FROM golang:1.22-alpine AS go-build
+FROM golang:1.27-alpine AS go-build
 
 WORKDIR /src
 COPY go.mod go.sum ./

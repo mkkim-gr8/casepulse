@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log"
 
 	cliov1 "github.com/mkkim-gr8/casepulse/gen/go/clio/v1"
 	"github.com/mkkim-gr8/casepulse/internal/clio"
@@ -25,7 +26,10 @@ func RegisterServer(registrar grpc.ServiceRegistrar, store *clio.Store) {
 
 // ListCases는 저장소의 사건을 Protobuf 응답으로 바꿔 반환합니다.
 func (s server) ListCases(ctx context.Context, _ *cliov1.ListCasesRequest) (*cliov1.ListCasesResponse, error) {
-	records := s.store.List(ctx)
+	records, err := s.store.List(ctx)
+	if err != nil {
+		return nil, storeError(ctx, err)
+	}
 	cases := make([]*cliov1.Case, len(records))
 	for i, record := range records {
 		cases[i] = recordToProto(record)
@@ -43,7 +47,7 @@ func (s server) GetCase(ctx context.Context, request *cliov1.GetCaseRequest) (*c
 		return nil, status.Error(codes.NotFound, err.Error())
 	}
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		return nil, storeError(ctx, err)
 	}
 	return recordToProto(record), nil
 }
@@ -55,17 +59,27 @@ func (s server) CreateCase(ctx context.Context, request *cliov1.CreateCaseReques
 		return nil, status.Error(codes.InvalidArgument, "사건 정보가 비어 있습니다")
 	}
 	record, err := s.store.Create(ctx, caseFromProto(request.Input))
+	var validation *clio.ValidationError
 	switch {
 	case errors.Is(err, clio.ErrDuplicateCase):
 		return nil, status.Error(codes.AlreadyExists, err.Error())
+	case errors.As(err, &validation):
+		return nil, status.Error(codes.InvalidArgument, validation.Error())
 	case err != nil:
-		if ctx.Err() != nil {
-			return nil, status.FromContextError(ctx.Err()).Err()
-		}
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, storeError(ctx, err)
 	default:
 		return recordToProto(record), nil
 	}
+}
+
+// storeError는 저장소 오류를 gRPC 상태로 바꿉니다. DB 오류의 자세한 내용은 Clio 로그에만 남기고
+// 호출한 쪽에는 일반적인 메시지만 돌려줍니다.
+func storeError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return status.FromContextError(ctx.Err()).Err()
+	}
+	log.Printf("clio store error: %v", err)
+	return status.Error(codes.Unavailable, "사건 저장소를 사용할 수 없습니다")
 }
 
 // caseFromProto는 gRPC 요청의 필드를 Clio 내부 사건 자료형으로 옮깁니다.
