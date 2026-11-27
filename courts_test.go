@@ -46,6 +46,12 @@ func TestCourtDirectory(t *testing.T) {
 	}
 
 	expectedPanels := map[string][]string{
+		// 재판부구성표에서 한때 통째로 빠졌던 합의부·단독(2026. 11. 대조 후 보완)이 다시 빠지지 않는지 확인합니다.
+		"court-district-cheongju":    {"제1민사부", "민사15단독"},
+		"court-district-ulsan":       {"제1-1형사부"},
+		"court-family-ulsan":         {"제1가사부", "제2가사비송단독"},
+		"court-district-seoul-north": {"제1민사부"},
+		"court-district-seoul-west":  {"제2-1민사부"},
 		"court-high-seoul": {
 			"제1-1민사부",
 		},
@@ -71,13 +77,13 @@ func TestCourtDirectory(t *testing.T) {
 			"창원제1행정부", "창원제4민사부",
 		},
 		"court-district-seoul-central": {
-			"제91민사단독", "제1형사단독",
+			"제91민사단독", "제1형사단독", "제1민사부", "제63민사부", "제1형사부", "제1001민사단독",
 		},
 		"court-family-seoul": {
 			"제1가사부", "가사제3단독",
 		},
 		"court-rehabilitation-seoul": {
-			"제1부", "제11부",
+			"제1부", "제11부", "제101단독", "제521단독",
 		},
 	}
 	panelIDs := make(map[string]bool)
@@ -111,8 +117,8 @@ func TestCourtDirectory(t *testing.T) {
 			}
 		}
 	}
-	if panelCount != 2883 {
-		t.Errorf("found %d panels, want 2883", panelCount)
+	if panelCount != 3456 {
+		t.Errorf("found %d panels, want 3456", panelCount)
 	}
 
 	remoteHighCourts := map[string]struct {
@@ -345,6 +351,159 @@ func TestFamilyBranchSeatsFollowByeolpyo1(t *testing.T) {
 	} {
 		if got := byName[name].Seat; got != want {
 			t.Errorf("%s Seat = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// expectedPanelCounts는 법원별 재판부 수입니다. documents/pdfs/court/재판부구성표.pdf와 법원마다 대조해 확인한 값입니다.
+//
+// 처음 옮겨 적을 때 "민사제2단독(조정)"처럼 이름 뒤에 괄호 안내가 붙은 재판부와 여러 쪽에 걸친 표의 뒷부분이 빠져,
+// 서울중앙지방법원 등 40여 개 법원에서 재판부 약 570개가 누락된 적이 있습니다(2026. 11. 보완).
+// 구성표 개정으로 재판부를 고칠 때는 PDF와 대조한 뒤 이 값도 함께 고쳐야 합니다.
+var expectedPanelCounts = map[string]int{
+	"court-administrative-seoul":            25,
+	"court-branch-busan-dongbu":             42,
+	"court-branch-busan-seobu":              41,
+	"court-branch-changwon-geochang":        7,
+	"court-branch-changwon-jinju":           40,
+	"court-branch-changwon-masan":           23,
+	"court-branch-changwon-miryang":         6,
+	"court-branch-changwon-tongyeong":       25,
+	"court-branch-cheongju-chungju":         23,
+	"court-branch-cheongju-jecheon":         13,
+	"court-branch-cheongju-yeongdong":       8,
+	"court-branch-chuncheon-gangneung":      32,
+	"court-branch-chuncheon-sokcho":         12,
+	"court-branch-chuncheon-wonju":          30,
+	"court-branch-chuncheon-yeongwol":       14,
+	"court-branch-daegu-andong":             11,
+	"court-branch-daegu-gimcheon":           27,
+	"court-branch-daegu-gyeongju":           17,
+	"court-branch-daegu-pohang":             14,
+	"court-branch-daegu-sangju":             5,
+	"court-branch-daegu-uiseong":            10,
+	"court-branch-daejeon-cheonan":          19,
+	"court-branch-daejeon-gongju":           9,
+	"court-branch-daejeon-hongseong":        20,
+	"court-branch-daejeon-nonsan":           13,
+	"court-branch-daejeon-seosan":           24,
+	"court-branch-gwangju-haenam":           21,
+	"court-branch-gwangju-jangheung":        10,
+	"court-branch-gwangju-mokpo":            24,
+	"court-branch-gwangju-suncheon":         31,
+	"court-branch-incheon-bucheon":          43,
+	"court-branch-jeonju-gunsan":            20,
+	"court-branch-jeonju-jeongeup":          14,
+	"court-branch-jeonju-namwon":            15,
+	"court-branch-suwon-ansan":              41,
+	"court-branch-suwon-anyang":             38,
+	"court-branch-suwon-pyeongtaek":         33,
+	"court-branch-suwon-seongnam":           55,
+	"court-branch-suwon-yeoju":              21,
+	"court-branch-uijeongbu-goyang":         49,
+	"court-branch-uijeongbu-namyangju":      48,
+	"court-district-busan":                  85,
+	"court-district-cheongju":               70,
+	"court-district-chuncheon":              62,
+	"court-district-daegu":                  81,
+	"court-district-daejeon":                73,
+	"court-district-gwangju":                101,
+	"court-district-incheon":                140,
+	"court-district-jeju":                   66,
+	"court-district-jeonju":                 46,
+	"court-district-seoul-central":          289,
+	"court-district-seoul-east":             67,
+	"court-district-seoul-north":            55,
+	"court-district-seoul-south":            88,
+	"court-district-seoul-west":             45,
+	"court-district-suwon":                  96,
+	"court-district-uijeongbu":              96,
+	"court-district-ulsan":                  69,
+	"court-family-branch-daegu-andong":      2,
+	"court-family-branch-daegu-gimcheon":    1,
+	"court-family-branch-daegu-gyeongju":    5,
+	"court-family-branch-daegu-pohang":      2,
+	"court-family-branch-daegu-sangju":      2,
+	"court-family-branch-daegu-uiseong":     1,
+	"court-family-branch-daejeon-gongju":    3,
+	"court-family-branch-daejeon-hongseong": 2,
+	"court-family-branch-daejeon-nonsan":    5,
+	"court-family-branch-daejeon-seosan":    3,
+	"court-family-branch-gwangju-haenam":    1,
+	"court-family-branch-gwangju-mokpo":     6,
+	"court-family-branch-gwangju-suncheon":  4,
+	"court-family-branch-incheon-bucheon":   5,
+	"court-family-branch-jeonju-gunsan":     4,
+	"court-family-branch-jeonju-jeongeup":   3,
+	"court-family-branch-jeonju-namwon":     2,
+	"court-family-branch-suwon-ansan":       7,
+	"court-family-branch-suwon-anyang":      10,
+	"court-family-branch-suwon-pyeongtaek":  3,
+	"court-family-branch-suwon-seongnam":    5,
+	"court-family-branch-suwon-yeoju":       2,
+	"court-family-busan":                    24,
+	"court-family-daegu":                    18,
+	"court-family-daejeon":                  26,
+	"court-family-gwangju":                  26,
+	"court-family-incheon":                  18,
+	"court-family-jeonju":                   4,
+	"court-family-seoul":                    46,
+	"court-family-suwon":                    23,
+	"court-family-ulsan":                    18,
+	"court-high-busan":                      95,
+	"court-high-busan-changwon":             10,
+	"court-high-busan-ulsan":                8,
+	"court-high-daegu":                      11,
+	"court-high-daejeon":                    25,
+	"court-high-daejeon-cheongju":           15,
+	"court-high-gwangju":                    17,
+	"court-high-gwangju-jeju":               20,
+	"court-high-gwangju-jeonju":             12,
+	"court-high-seoul":                      131,
+	"court-high-seoul-chuncheon":            8,
+	"court-high-seoul-incheon":              9,
+	"court-high-suwon":                      42,
+	"court-patent":                          12,
+	"court-rehabilitation-busan":            35,
+	"court-rehabilitation-daegu":            16,
+	"court-rehabilitation-daejeon":          18,
+	"court-rehabilitation-gwangju":          28,
+	"court-rehabilitation-seoul":            80,
+	"court-rehabilitation-suwon":            81,
+}
+
+// TestCourtPanelCounts는 법원별 재판부 수가 구성표와 대조한 값과 같은지 확인합니다.
+// 재판부가 빠지거나 다른 법원으로 잘못 들어가면 해당 법원의 수가 달라져 실패합니다.
+func TestCourtPanelCounts(t *testing.T) {
+	seen := make(map[string]bool)
+	for _, court := range Courts() {
+		want, listed := expectedPanelCounts[court.ID]
+		if len(court.Panels) == 0 && !listed {
+			continue
+		}
+		seen[court.ID] = true
+		if len(court.Panels) != want {
+			t.Errorf("%s(%s) has %d panels, want %d", court.Name, court.ID, len(court.Panels), want)
+		}
+	}
+	for id := range expectedPanelCounts {
+		if !seen[id] {
+			t.Errorf("expectedPanelCounts has unknown or panel-less court %q", id)
+		}
+	}
+}
+
+// TestCourtPanelNames는 재판부 이름이 표기 규칙을 지키는지 확인합니다.
+// 구성표의 괄호·대괄호 안내(예: "(조정)", "[일반]")는 이름에 넣지 않으며, 이름은 "부", "단독", "전담"으로 끝납니다.
+func TestCourtPanelNames(t *testing.T) {
+	for _, court := range Courts() {
+		for _, panel := range court.Panels {
+			if strings.ContainsAny(panel.Name, "()[]") {
+				t.Errorf("%s panel %q contains a bracketed note", court.ID, panel.Name)
+			}
+			if !strings.HasSuffix(panel.Name, "부") && !strings.HasSuffix(panel.Name, "단독") && !strings.HasSuffix(panel.Name, "전담") {
+				t.Errorf("%s panel %q does not end with 부, 단독 or 전담", court.ID, panel.Name)
+			}
 		}
 	}
 }

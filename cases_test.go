@@ -45,19 +45,23 @@ func TestCaseValidate(t *testing.T) {
 	valid := []Case{
 		{ // 원고·피고 2인
 			Number: num, Title: "손해배상(기)", Category: CaseCategoryCivil, Court: seoulCivil,
-			Parties: []Party{{"원고", "홍길동"}, {"피고", "주식회사 가나다"}},
+			Parties: []Party{{"원고", "홍길동", true}, {"피고", "주식회사 가나다", false}},
 		},
 		{ // 신청인 1인
 			Number: CaseNumber{2026, "카단", 5}, Title: "부동산가압류", Category: CaseCategoryCivilApplication, Court: seoulCivil,
-			Parties: []Party{{"채권자", "홍길동"}},
+			Parties: []Party{{"채권자", "홍길동", true}},
 		},
 		{ // 3인 이상
 			Number: num, Title: "공유물분할", Category: CaseCategoryCivil, Court: seoulCivil,
-			Parties: []Party{{"원고", "갑"}, {"피고1", "을"}, {"피고2", "병"}, {"피고3", "정"}},
+			Parties: []Party{{"원고", "갑", false}, {"피고1", "을", true}, {"피고2", "병", false}, {"피고3", "정", true}},
+		},
+		{ // 번호·괄호 표기가 달라도 같은 쪽이면 함께 의뢰인이 될 수 있습니다.
+			Number: num, Title: "손해배상(기)", Category: CaseCategoryCivil, Court: seoulCivil,
+			Parties: []Party{{"원고1", "갑", true}, {"원고 2", "을", true}, {"원고3(반소피고)", "병", true}, {"피고", "정", false}},
 		},
 		{ // 형사: 피고인·검사
 			Number: CaseNumber{2026, "고단", 9}, Title: "사기", Category: CaseCategoryCriminal, Court: seoulCivil,
-			Parties: []Party{{"피고인", "김철수"}, {"검사", "이영희"}},
+			Parties: []Party{{"피고인", "김철수", true}, {"검사", "이영희", false}},
 		},
 	}
 	for i, c := range valid {
@@ -72,19 +76,33 @@ func TestCaseValidate(t *testing.T) {
 		wantMsg string
 	}{
 		{"no parties", Case{Number: num, Title: "x", Category: CaseCategoryCivil, Court: seoulCivil}, "당사자가 한 명 이상"},
-		{"empty role", Case{Number: num, Title: "x", Category: CaseCategoryCivil, Court: seoulCivil, Parties: []Party{{"", "갑"}}}, "지위가 비어"},
-		{"empty title", Case{Number: num, Category: CaseCategoryCivil, Court: seoulCivil, Parties: []Party{{"원고", "갑"}}}, "사건명"},
-		{"family without court", Case{Number: num, Title: "x", Category: CaseCategoryFamily, Parties: []Party{{"원고", "갑"}}}, "계속 법원이 비어"},
-		{"criminal without court", Case{Number: num, Title: "x", Category: CaseCategoryCriminal, Parties: []Party{{"피고인", "갑"}, {"검사", "을"}}}, "계속 법원이 비어"},
-		{"criminal without panel", Case{Number: num, Title: "x", Category: CaseCategoryCriminal, Court: CourtAssignment{CourtID: "court-district-seoul-central"}, Parties: []Party{{"피고인", "갑"}}}, "재판부가 비어"},
-		{"unknown court", Case{Number: num, Title: "x", Category: CaseCategoryAdministrative, Court: CourtAssignment{"court-nope", "제1부"}, Parties: []Party{{"원고", "갑"}}}, "법원 목록에 없습니다"},
-		{"panel of other court", Case{Number: num, Title: "x", Category: CaseCategoryCivil, Court: CourtAssignment{"court-district-incheon", "제91민사단독"}, Parties: []Party{{"원고", "갑"}}}, "소속이 아닙니다"},
-		{"bad category", Case{Number: num, Title: "x", Category: "tax", Parties: []Party{{"원고", "갑"}}}, "사건 종류"},
+		{"empty role", Case{Number: num, Title: "x", Category: CaseCategoryCivil, Court: seoulCivil, Parties: []Party{{Role: "", Name: "갑", Client: true}}}, "지위가 비어"},
+		{"no client", Case{Number: num, Title: "x", Category: CaseCategoryCivil, Court: seoulCivil, Parties: []Party{{Role: "원고", Name: "갑"}, {Role: "피고", Name: "을"}}}, "의뢰인으로 표시된 당사자"},
+		{"clients on both sides", Case{Number: num, Title: "x", Category: CaseCategoryCivil, Court: seoulCivil, Parties: []Party{{"원고", "갑", true}, {"피고", "을", true}}}, "이해충돌"},
+		{"criminal defendant and prosecutor", Case{Number: num, Title: "x", Category: CaseCategoryCriminal, Court: seoulCivil, Parties: []Party{{"피고인", "갑", true}, {"검사", "을", true}}}, "피고인, 검사"},
+		{"empty title", Case{Number: num, Category: CaseCategoryCivil, Court: seoulCivil, Parties: []Party{{Role: "원고", Name: "갑", Client: true}}}, "사건명"},
+		{"family without court", Case{Number: num, Title: "x", Category: CaseCategoryFamily, Parties: []Party{{Role: "원고", Name: "갑", Client: true}}}, "계속 법원이 비어"},
+		{"criminal without court", Case{Number: num, Title: "x", Category: CaseCategoryCriminal, Parties: []Party{{Role: "피고인", Name: "갑", Client: true}, {Role: "검사", Name: "을"}}}, "계속 법원이 비어"},
+		{"criminal without panel", Case{Number: num, Title: "x", Category: CaseCategoryCriminal, Court: CourtAssignment{CourtID: "court-district-seoul-central"}, Parties: []Party{{Role: "피고인", Name: "갑", Client: true}}}, "재판부가 비어"},
+		{"unknown court", Case{Number: num, Title: "x", Category: CaseCategoryAdministrative, Court: CourtAssignment{CourtID: "court-nope", PanelName: "제1부"}, Parties: []Party{{Role: "원고", Name: "갑", Client: true}}}, "법원 목록에 없습니다"},
+		{"panel of other court", Case{Number: num, Title: "x", Category: CaseCategoryCivil, Court: CourtAssignment{CourtID: "court-district-incheon", PanelName: "제91민사단독"}, Parties: []Party{{Role: "원고", Name: "갑", Client: true}}}, "소속이 아닙니다"},
+		{"bad category", Case{Number: num, Title: "x", Category: "tax", Parties: []Party{{Role: "원고", Name: "갑", Client: true}}}, "사건 종류"},
 	}
 	for _, tt := range invalid {
 		err := tt.c.Validate()
 		if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
 			t.Errorf("%s: error = %v, want containing %q", tt.name, err, tt.wantMsg)
+		}
+	}
+}
+
+func TestPartySide(t *testing.T) {
+	for role, want := range map[string]string{
+		"원고": "원고", "원고1": "원고", "원고 12": "원고", "피고(반소원고)": "피고",
+		"피고3(반소원고)": "피고", "피고인2": "피고인", " 채권자 ": "채권자", "제3채무자": "제3채무자",
+	} {
+		if got := PartySide(role); got != want {
+			t.Errorf("PartySide(%q) = %q, want %q", role, got, want)
 		}
 	}
 }
