@@ -15,6 +15,7 @@ import { Combobox } from "@/components/combobox";
 import { cn } from "@/lib/utils";
 import { createCase } from "./api.js";
 import { CATEGORIES, clientSides } from "./cases.js";
+import { MOD_KEY } from "./keyboard.js";
 
 // 사건 종류별로 지위 입력칸에 띄울 추천 값입니다. 목록에 없는 지위도 자유롭게 입력할 수 있습니다.
 const ROLE_SUGGESTIONS = {
@@ -424,7 +425,7 @@ export default function CaseForm({ formId, courts, courtsError, active, defaultL
           <div className="flex items-center justify-end gap-2">
             <span className="mr-auto flex items-center gap-1 text-xs text-muted-foreground">
               <KbdGroup>
-                <Kbd>Ctrl</Kbd>
+                <Kbd>{MOD_KEY}</Kbd>
                 <Kbd>Enter</Kbd>
               </KbdGroup>
               로 등록
