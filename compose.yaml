@@ -1,0 +1,31 @@
+services:
+  leviathan:
+    build:
+      context: .
+      dockerfile: cmd/leviathan/Dockerfile
+    expose:
+      - "9090"
+
+  clio:
+    build:
+      context: .
+      dockerfile: cmd/clio/Dockerfile
+    environment:
+      LEVIATHAN_GRPC_ADDR: leviathan:9090
+    depends_on:
+      - leviathan
+    expose:
+      - "9091"
+
+  aegis:
+    build:
+      context: .
+      dockerfile: cmd/aegis/Dockerfile
+    environment:
+      LEVIATHAN_GRPC_ADDR: leviathan:9090
+      CLIO_GRPC_ADDR: clio:9091
+    depends_on:
+      - clio
+      - leviathan
+    ports:
+      - "8080:8080"

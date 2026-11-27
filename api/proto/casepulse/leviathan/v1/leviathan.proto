@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+// Leviathan은 법원·공소청·중대범죄수사청 기관 정보를 제공합니다.
+package casepulse.leviathan.v1;
+
+option go_package = "github.com/mkkim-gr8/casepulse/gen/go/leviathan/v1;leviathanv1";
+
+// LeviathanService는 기관 목록과 ID 조회 기능을 제공합니다.
+service LeviathanService {
+  // 모든 법원과 각 법원의 재판부를 반환합니다.
+  rpc ListCourts(ListCourtsRequest) returns (ListCourtsResponse);
+  // ID에 해당하는 법원 한 곳을 반환합니다.
+  rpc GetCourt(GetCourtRequest) returns (Court);
+  // 모든 공소청과 소속 기관을 반환합니다.
+  rpc ListProsecutionOffices(ListProsecutionOfficesRequest) returns (ListProsecutionOfficesResponse);
+  // ID에 해당하는 공소청 한 곳을 반환합니다.
+  rpc GetProsecutionOffice(GetProsecutionOfficeRequest) returns (ProsecutionOffice);
+  // 모든 중대범죄수사청 기관을 반환합니다.
+  rpc ListInvestigationAgencies(ListInvestigationAgenciesRequest) returns (ListInvestigationAgenciesResponse);
+  // ID에 해당하는 수사기관 한 곳을 반환합니다.
+  rpc GetInvestigationAgency(GetInvestigationAgencyRequest) returns (InvestigationAgency);
+}
+
+// ListCourtsRequest는 전체 법원 조회 요청입니다.
+message ListCourtsRequest {}
+
+// ListCourtsResponse는 법원 목록을 담습니다.
+message ListCourtsResponse {
+  // courts는 법원과 각 법원의 재판부 목록입니다.
+  repeated Court courts = 1;
+}
+
+// GetCourtRequest는 조회할 법원의 고유 ID를 담습니다.
+message GetCourtRequest {
+  // id는 Leviathan이 관리하는 법원 ID입니다.
+  string id = 1;
+}
+
+// Court는 법원의 기본 정보와 관할, 재판부 정보를 담습니다.
+message Court {
+  // id는 법원을 구분하는 고유 ID입니다.
+  string id = 1;
+  // name은 법원의 공식 이름입니다.
+  string name = 2;
+  // institution_type은 기관 종류 코드입니다.
+  string institution_type = 3;
+  // postal_code와 address는 우편번호와 주소입니다.
+  string postal_code = 4;
+  string address = 5;
+  // phone과 email은 데이터에 있는 연락처입니다.
+  string phone = 6;
+  string email = 7;
+  // level, court_type, unit_type은 법원의 단계·종류·조직상 구분입니다.
+  string level = 8;
+  string court_type = 9;
+  string unit_type = 10;
+  // parent_court_id는 상위 법원이 있으면 그 ID입니다.
+  string parent_court_id = 11;
+  // seat는 법원 자료에 기재된 소재지입니다.
+  string seat = 12;
+  // jurisdictions는 이 법원이 담당하는 지역 목록입니다.
+  repeated string jurisdictions = 13;
+  // panels는 법원에 속한 재판부 목록입니다.
+  repeated CourtPanel panels = 14;
+}
+
+// CourtPanel은 법원에 속한 재판부 하나의 정보입니다.
+message CourtPanel {
+  // id는 재판부 ID입니다.
+  string id = 1;
+  // name은 재판부 이름입니다.
+  string name = 2;
+  // seat는 재판부별 소재지 표기가 있을 때 사용합니다.
+  string seat = 3;
+}
+
+// ListProsecutionOfficesRequest는 전체 공소청 조회 요청입니다.
+message ListProsecutionOfficesRequest {}
+
+// ListProsecutionOfficesResponse는 공소청 목록을 담습니다.
+message ListProsecutionOfficesResponse {
+  // offices는 공소청과 그 소속 기관 목록입니다.
+  repeated ProsecutionOffice offices = 1;
+}
+
+// GetProsecutionOfficeRequest는 조회할 공소청의 고유 ID를 담습니다.
+message GetProsecutionOfficeRequest {
+  // id는 조회할 공소청의 고유 ID입니다.
+  string id = 1;
+}
+
+// ProsecutionOffice는 공소청 한 곳의 기본 정보와 소속 관계를 담습니다.
+message ProsecutionOffice {
+  // id는 기관을 구분하는 고유 ID입니다.
+  string id = 1;
+  // name은 기관의 공식 이름입니다.
+  string name = 2;
+  // institution_type은 기관 종류 코드입니다.
+  string institution_type = 3;
+  // postal_code와 address는 우편번호와 주소입니다.
+  string postal_code = 4;
+  string address = 5;
+  // phone과 email은 데이터에 있는 연락처입니다.
+  string phone = 6;
+  string email = 7;
+  // level과 unit_type은 기관의 단계와 조직상 구분입니다.
+  string level = 8;
+  string unit_type = 9;
+  // parent_office_id는 상위 공소청이 있으면 그 ID입니다.
+  string parent_office_id = 10;
+  // seat는 기관 자료에 기재된 소재지입니다.
+  string seat = 11;
+}
+
+// ListInvestigationAgenciesRequest는 전체 수사기관 조회 요청입니다.
+message ListInvestigationAgenciesRequest {}
+
+// ListInvestigationAgenciesResponse는 수사기관 목록을 담습니다.
+message ListInvestigationAgenciesResponse {
+  // agencies는 본청과 지방수사청 목록입니다.
+  repeated InvestigationAgency agencies = 1;
+}
+
+// GetInvestigationAgencyRequest는 조회할 수사기관의 고유 ID를 담습니다.
+message GetInvestigationAgencyRequest {
+  // id는 조회할 수사기관의 고유 ID입니다.
+  string id = 1;
+}
+
+// InvestigationAgency는 수사기관 한 곳의 기본 정보와 관할을 담습니다.
+message InvestigationAgency {
+  // id는 기관을 구분하는 고유 ID입니다.
+  string id = 1;
+  // name은 기관의 공식 이름입니다.
+  string name = 2;
+  // institution_type은 기관 종류 코드입니다.
+  string institution_type = 3;
+  // postal_code와 address는 우편번호와 주소입니다.
+  string postal_code = 4;
+  string address = 5;
+  // phone과 email은 데이터에 있는 연락처입니다.
+  string phone = 6;
+  string email = 7;
+  // short_name은 기관의 약칭입니다.
+  string short_name = 8;
+  // level은 조직에서의 단계입니다.
+  string level = 9;
+  // parent_agency_id는 상위 기관이 있으면 그 ID입니다.
+  string parent_agency_id = 10;
+  // seat는 기관 자료에 기재된 소재지입니다.
+  string seat = 11;
+  // jurisdictions는 기관이 담당하는 지역 목록입니다.
+  repeated string jurisdictions = 12;
+}

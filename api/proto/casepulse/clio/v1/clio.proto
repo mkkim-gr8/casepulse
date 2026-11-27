@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+// Clio는 사건 정보의 조회와 등록을 담당합니다.
+package casepulse.clio.v1;
+
+option go_package = "github.com/mkkim-gr8/casepulse/gen/go/clio/v1;cliov1";
+
+// ClioService는 다른 서비스가 사건 정보를 주고받을 때 사용하는 gRPC API입니다.
+service ClioService {
+  // 사건 목록과 전체 건수를 반환합니다.
+  rpc ListCases(ListCasesRequest) returns (ListCasesResponse);
+  // ID에 해당하는 사건 한 건을 반환합니다.
+  rpc GetCase(GetCaseRequest) returns (Case);
+  // 사건 정보를 검증한 뒤 등록하고, 등록된 사건을 반환합니다.
+  rpc CreateCase(CreateCaseRequest) returns (Case);
+}
+
+// ListCasesRequest는 전체 목록 조회 요청입니다. 현재 별도 검색 조건은 없습니다.
+message ListCasesRequest {}
+
+// ListCasesResponse는 사건 목록과 목록의 전체 건수를 담습니다.
+message ListCasesResponse {
+  // cases는 사건 자료의 목록입니다.
+  repeated Case cases = 1;
+  // total은 전체 사건 수입니다.
+  int32 total = 2;
+}
+
+// GetCaseRequest는 조회할 사건의 고유 ID를 담습니다.
+message GetCaseRequest {
+  // id는 조회할 사건의 고유 ID입니다.
+  string id = 1;
+}
+
+// CreateCaseRequest는 새 사건을 만들 때 필요한 입력값을 담습니다.
+message CreateCaseRequest {
+  // input은 등록할 사건의 입력값입니다.
+  CaseInput input = 1;
+}
+
+// CaseInput은 서버가 새 ID와 법원 표시 정보를 붙이기 전의 사건 입력 자료입니다.
+message CaseInput {
+  // number는 연도·사건부호·일련번호로 나눈 사건번호입니다.
+  CaseNumber number = 1;
+  // title은 사용자가 입력한 사건명입니다.
+  string title = 2;
+  // category는 사건 종류 코드입니다(예: civil, criminal).
+  string category = 3;
+  // parties는 당사자 목록이며 입력 순서를 유지합니다.
+  repeated Party parties = 4;
+  // court는 계속 법원 ID와 재판부 이름입니다.
+  CourtAssignment court = 5;
+}
+
+// Case는 사건 정보와 화면에 표시할 법원 정보를 함께 담습니다.
+message Case {
+  // id는 Clio가 사건을 등록할 때 부여하는 ID입니다.
+  string id = 1;
+  // number는 사건번호의 각 부분입니다.
+  CaseNumber number = 2;
+  // title은 사건명입니다.
+  string title = 3;
+  // category는 사건 종류 코드입니다.
+  string category = 4;
+  // parties는 당사자 목록입니다.
+  repeated Party parties = 5;
+  // court는 법원 ID뿐 아니라 화면에 필요한 이름·주소도 포함합니다.
+  CaseCourt court = 6;
+}
+
+// CaseNumber는 사건번호를 연도, 사건부호, 일련번호로 나눠 표현합니다.
+message CaseNumber {
+  // year는 접수 연도입니다.
+  int64 year = 1;
+  // code는 사건부호입니다(예: 가합, 고단).
+  string code = 2;
+  // serial은 해당 연도·사건부호 안의 일련번호입니다.
+  int64 serial = 3;
+}
+
+// Party는 사건 당사자의 지위, 이름, 의뢰인 여부를 표현합니다.
+message Party {
+  // role은 원고, 피고, 피고인 등의 지위입니다.
+  string role = 1;
+  // name은 당사자의 이름 또는 기관명입니다.
+  string name = 2;
+  // client가 true이면 우리 사무소의 의뢰인입니다.
+  bool client = 3;
+}
+
+// CourtAssignment은 사건이 계속 중인 법원 ID와 재판부 이름을 가리킵니다.
+message CourtAssignment {
+  // id는 Leviathan이 관리하는 법원 ID입니다.
+  string id = 1;
+  // panel은 해당 법원에 속한 재판부의 이름입니다.
+  string panel = 2;
+}
+
+// CaseCourt는 사건 조회 화면에 필요한 법원과 재판부의 표시 정보를 담습니다.
+message CaseCourt {
+  // id는 법원 ID입니다.
+  string id = 1;
+  // panel은 사건이 배정된 재판부 이름입니다.
+  string panel = 2;
+  // name은 법원 이름입니다.
+  string name = 3;
+  // seat는 법원의 소재지 표기입니다.
+  string seat = 4;
+  // postal_code는 우편번호입니다.
+  string postal_code = 5;
+  // address는 도로명 주소입니다.
+  string address = 6;
+}
