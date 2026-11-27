@@ -115,11 +115,44 @@ func ParseCaseNumber(s string) (CaseNumber, error) {
 // 지위와 이름은 모두 사용자가 직접 입력합니다. 지위는 정해진 값 목록이 없으며,
 // 민사 등에서는 "원고", "피고", "채권자", "신청인", "원고(반소피고)" 등을,
 // 형사사건에서는 "피고인", "검사" 등을 그대로 적습니다.
+//
+// 의뢰인 여부는 당사자마다 따로 표시합니다. 같은 지위의 당사자가 여럿이어도
+// 그중 일부만 의뢰인일 수 있기 때문입니다(예: 원고 3명 중 원고1·원고3만 의뢰인).
 type Party struct {
 	// Role은 당사자 지위입니다(예: "원고", "피고", "피고인", "검사").
 	Role string
 	// Name은 당사자 이름입니다(예: "홍길동", "주식회사 가나다", "서울중앙지방공소청 검사 김OO").
 	Name string
+	// Client는 이 당사자가 우리 사무소의 의뢰인인지 나타냅니다.
+	// 한 사건에는 의뢰인인 당사자가 반드시 한 명 이상 있어야 하고, 의뢰인은 모두 같은 지위여야 합니다
+	// (지위가 다른 당사자를 함께 대리하면 이해충돌이 생기기 때문입니다. PartySide 참고).
+	Client bool
+}
+
+// PartySide는 지위를 같은 쪽 당사자끼리 비교할 수 있는 값으로 바꿉니다.
+// 괄호 안의 표기, 끝의 번호, 띄어쓰기를 지웁니다.
+//
+//	"원고1", "원고 2"        → "원고"
+//	"피고(반소원고)"         → "피고"
+//	"피고인3"               → "피고인"
+//
+// 의뢰인들이 모두 같은 쪽인지 검사할 때 씁니다(Case.Validate).
+func PartySide(role string) string {
+	var b strings.Builder
+	depth := 0
+	for _, r := range role {
+		switch {
+		case r == '(' || r == '（':
+			depth++
+		case r == ')' || r == '）':
+			if depth > 0 {
+				depth--
+			}
+		case depth == 0 && !unicode.IsSpace(r):
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimRight(b.String(), "0123456789")
 }
 
 // CourtAssignment는 사건이 계속 중인 법원과 재판부입니다.
@@ -139,17 +172,44 @@ type Case struct {
 	Title string
 	// Category는 사건 종류입니다.
 	Category CaseCategory
-	// Parties는 당사자 목록이며 1명 이상입니다. 사용자가 입력한 순서를 그대로 유지합니다.
+	// Parties는 당사자 목록이며 1명 이상이고, 그중 의뢰인(Client)이 1명 이상 있어야 합니다.
+	// 사용자가 입력한 순서를 그대로 유지합니다.
 	// 보통 원고·피고(형사는 피고인·검사) 두 명이지만, 1명이거나 3명 이상일 수도 있습니다.
 	Parties []Party
 	// Court는 사건이 계속 중인 법원과 재판부이며, 모든 종류의 사건에 필수입니다.
 	Court CourtAssignment
 }
 
+// Clients는 의뢰인으로 표시된 당사자를 입력 순서대로 돌려줍니다.
+func (c Case) Clients() []Party {
+	var clients []Party
+	for _, p := range c.Parties {
+		if p.Client {
+			clients = append(clients, p)
+		}
+	}
+	return clients
+}
+
+// clientSides는 의뢰인들의 지위(PartySide)를 처음 나온 순서대로 중복 없이 돌려줍니다.
+func clientSides(clients []Party) []string {
+	var sides []string
+	seen := make(map[string]bool)
+	for _, p := range clients {
+		side := PartySide(p.Role)
+		if side != "" && !seen[side] {
+			seen[side] = true
+			sides = append(sides, side)
+		}
+	}
+	return sides
+}
+
 // Validate는 사건 정보가 빠짐없이 올바르게 들어 있는지 검사하고, 문제를 모두 모아 돌려줍니다.
 //
 //   - 사건번호 형식, 사건명, 사건 종류
-//   - 당사자 1명 이상, 각 당사자의 지위와 이름
+//   - 당사자 1명 이상, 각 당사자의 지위와 이름, 의뢰인으로 표시된 당사자 1명 이상
+//   - 의뢰인이 모두 같은 지위인지(이해충돌 방지)
 //   - 계속 법원·재판부: Courts 목록에 있는 법원인지, 재판부가 그 법원 소속인지
 func (c Case) Validate() error {
 	var errs []error
@@ -165,6 +225,10 @@ func (c Case) Validate() error {
 
 	if len(c.Parties) == 0 {
 		errs = append(errs, errors.New("당사자가 한 명 이상 있어야 합니다"))
+	} else if clients := c.Clients(); len(clients) == 0 {
+		errs = append(errs, errors.New("의뢰인으로 표시된 당사자가 한 명 이상 있어야 합니다"))
+	} else if sides := clientSides(clients); len(sides) > 1 {
+		errs = append(errs, fmt.Errorf("지위가 다른 당사자(%s)를 함께 의뢰인으로 할 수 없습니다(이해충돌)", strings.Join(sides, ", ")))
 	}
 	for i, p := range c.Parties {
 		if strings.TrimSpace(p.Role) == "" {
