@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
-	"sync"
 )
 
 var (
@@ -16,72 +14,100 @@ var (
 	ErrCaseNotFound = errors.New("사건을 찾을 수 없습니다")
 )
 
-// Record는 사건과 화면에 보여 줄 법원 정보를 함께 묶어 저장합니다.
+// ValidationError는 사용자 입력이 잘못되어 저장하지 않았음을 나타냅니다.
+// 저장소 장애와 구분해 gRPC InvalidArgument로 돌려주기 위해 씁니다.
+type ValidationError struct {
+	Err error
+}
+
+func (e *ValidationError) Error() string { return e.Err.Error() }
+func (e *ValidationError) Unwrap() error { return e.Err }
+
+// StoredCase는 저장소가 ID를 붙여 보관한 사건입니다.
+type StoredCase struct {
+	ID   string
+	Case Case
+}
+
+// Repository는 사건을 실제로 보관하는 곳(메모리, PostgreSQL)이 갖춰야 할 기능입니다.
+// 입력 검증과 법원 확인은 Store가 맡고, Repository는 저장과 조회만 합니다.
+type Repository interface {
+	// List는 최근 등록한 사건부터, 같은 때 등록한 사건은 사건번호가 큰 순서로 돌려줍니다.
+	List(ctx context.Context) ([]StoredCase, error)
+	// Get은 ID로 사건 한 건을 찾고, 없으면 ErrCaseNotFound를 돌려줍니다.
+	Get(ctx context.Context, id string) (StoredCase, error)
+	// Insert는 검증이 끝난 사건 여러 건을 한 번에 저장합니다. 하나라도 실패하면 아무것도 저장하지 않으며,
+	// 같은 법원·사건번호가 이미 있으면 ErrDuplicateCase를 돌려줍니다.
+	Insert(ctx context.Context, cases ...Case) ([]StoredCase, error)
+	// Count는 저장된 사건 수를 돌려줍니다.
+	Count(ctx context.Context) (int, error)
+}
+
+// Record는 사건과 화면에 보여 줄 법원 정보를 함께 묶은 값입니다.
 type Record struct {
 	ID    string
 	Case  Case
 	Court Court
 }
 
-// Store는 Clio 프로세스 안에서 사건을 임시로 보관하는 메모리 저장소입니다.
-// 현재 DB가 없으므로 프로세스를 재시작하면 여기에 추가한 사건은 사라집니다.
+// Store는 사건을 검증해 Repository에 저장하고, 조회 결과에 법원 정보를 붙이는 Clio의 서비스 계층입니다.
+// 법원 목록은 시작할 때 Leviathan에서 받은 스냅샷이며 바뀌지 않으므로 잠금 없이 읽습니다.
 type Store struct {
-	mu     sync.RWMutex      // 여러 gRPC 요청이 동시에 접근할 때 자료를 보호합니다.
-	courts map[string]Court  // 시작할 때 받은 법원 목록을 ID로 빠르게 찾습니다.
-	list   []Record          // 목록 API가 반환할 사건 순서를 보관합니다.
-	byID   map[string]Record // 사건 ID를 이용해 한 건을 빠르게 찾습니다.
-	keys   map[string]bool   // 법원 ID와 사건번호 조합의 중복 여부를 기억합니다.
-	nextID int               // 새 사건에 순서대로 붙일 임시 ID의 번호입니다.
+	repo   Repository
+	courts map[string]Court
 }
 
-// NewStore는 더미 사건과 법원 목록으로 메모리 저장소를 준비합니다.
-// 초기 사건이 목록에 없는 법원을 가리키면 데이터 오류를 바로 알 수 있도록 패닉을 일으킵니다.
-func NewStore(cases []Case, courts []Court) *Store {
-	s := &Store{
-		courts: make(map[string]Court, len(courts)),
-		byID:   make(map[string]Record, len(cases)),
-		keys:   make(map[string]bool, len(cases)),
-	}
+// NewStore는 저장소와 법원 목록으로 서비스 계층을 만듭니다.
+func NewStore(repo Repository, courts []Court) *Store {
+	s := &Store{repo: repo, courts: make(map[string]Court, len(courts))}
 	for _, court := range courts {
 		s.courts[court.ID] = cloneCourt(court)
 	}
-	for _, c := range cases {
-		court, ok := s.courts[c.Court.CourtID]
-		if !ok {
-			panic(fmt.Sprintf("사건 %s의 법원 ID %q가 법원 목록에 없습니다", c.Number, c.Court.CourtID))
-		}
-		s.add(c, court)
-	}
-	sort.SliceStable(s.list, func(i, j int) bool {
-		if s.list[i].Case.Number.Year != s.list[j].Case.Number.Year {
-			return s.list[i].Case.Number.Year > s.list[j].Case.Number.Year
-		}
-		return s.list[i].Case.Number.Serial > s.list[j].Case.Number.Serial
-	})
 	return s
 }
 
-// List는 최신 사건부터 복사해 돌려줍니다.
-// 복사본을 반환하므로 호출자가 결과를 바꿔도 저장소 안의 사건은 바뀌지 않습니다.
-func (s *Store) List(context.Context) []Record {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	records := make([]Record, len(s.list))
-	for i, record := range s.list {
-		records[i] = cloneRecord(record)
+// SeedIfEmpty는 저장소가 비어 있을 때만 cases를 검증해 한 번에 저장하고, 저장한 건수를 돌려줍니다.
+// 이미 사건이 있으면 아무것도 하지 않고 0을 돌려줍니다.
+func (s *Store) SeedIfEmpty(ctx context.Context, cases []Case) (int, error) {
+	count, err := s.repo.Count(ctx)
+	if err != nil {
+		return 0, err
 	}
-	return records
+	if count > 0 || len(cases) == 0 {
+		return 0, nil
+	}
+	for _, c := range cases {
+		if _, err := s.validate(c); err != nil {
+			return 0, fmt.Errorf("초기 사건 %s: %w", c.Number, err)
+		}
+	}
+	stored, err := s.repo.Insert(ctx, cases...)
+	if err != nil {
+		return 0, err
+	}
+	return len(stored), nil
+}
+
+// List는 저장된 사건에 법원 정보를 붙여 최신 사건부터 돌려줍니다.
+func (s *Store) List(ctx context.Context) ([]Record, error) {
+	stored, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]Record, len(stored))
+	for i, item := range stored {
+		records[i] = s.record(item)
+	}
+	return records, nil
 }
 
 // Get은 사건 ID로 사건 한 건을 찾습니다.
-func (s *Store) Get(_ context.Context, id string) (Record, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	record, ok := s.byID[id]
-	if !ok {
-		return Record{}, ErrCaseNotFound
+func (s *Store) Get(ctx context.Context, id string) (Record, error) {
+	stored, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return Record{}, err
 	}
-	return cloneRecord(record), nil
+	return s.record(stored), nil
 }
 
 // Create는 새 사건을 검사한 뒤 저장합니다.
@@ -90,6 +116,62 @@ func (s *Store) Create(ctx context.Context, c Case) (Record, error) {
 	if err := ctx.Err(); err != nil {
 		return Record{}, err
 	}
+	c = normalize(c)
+	if _, err := s.validate(c); err != nil {
+		return Record{}, err
+	}
+	stored, err := s.repo.Insert(ctx, c)
+	if err != nil {
+		return Record{}, err
+	}
+	return s.record(stored[0]), nil
+}
+
+// validate는 사건 필드와 법원·재판부 소속을 확인하고 해당 법원을 돌려줍니다.
+// 문제가 있으면 ValidationError로 감싸 돌려줍니다.
+func (s *Store) validate(c Case) (Court, error) {
+	court, err := s.checkCase(c)
+	if err != nil {
+		return Court{}, &ValidationError{Err: err}
+	}
+	return court, nil
+}
+
+// checkCase는 validate의 실제 검사입니다.
+func (s *Store) checkCase(c Case) (Court, error) {
+	if err := c.ValidateFields(); err != nil {
+		return Court{}, err
+	}
+	if c.Court.CourtID == "" {
+		return Court{}, errors.New("계속 법원이 비어 있습니다")
+	}
+	court, ok := s.courts[c.Court.CourtID]
+	if !ok {
+		return Court{}, fmt.Errorf("법원 ID %q는 법원 목록에 없습니다", c.Court.CourtID)
+	}
+	if c.Court.PanelName == "" {
+		return Court{}, fmt.Errorf("%s의 재판부가 비어 있습니다", court.Name)
+	}
+	for _, panel := range court.Panels {
+		if panel.Name == c.Court.PanelName {
+			return court, nil
+		}
+	}
+	return Court{}, fmt.Errorf("재판부 %q는 %s 소속이 아닙니다", c.Court.PanelName, court.Name)
+}
+
+// record는 저장된 사건에 법원 정보를 붙입니다. 저장 뒤 법원 목록에서 빠진 법원이면 ID만 채웁니다.
+func (s *Store) record(item StoredCase) Record {
+	court, ok := s.courts[item.Case.Court.CourtID]
+	if !ok {
+		court = Court{ID: item.Case.Court.CourtID}
+	}
+	return Record{ID: item.ID, Case: cloneCase(item.Case), Court: cloneCourt(court)}
+}
+
+// normalize는 사용자가 입력한 문자열 앞뒤 공백을 지웁니다.
+func normalize(c Case) Case {
+	c = cloneCase(c)
 	c.Number.Code = strings.TrimSpace(c.Number.Code)
 	c.Title = strings.TrimSpace(c.Title)
 	c.Court.CourtID = strings.TrimSpace(c.Court.CourtID)
@@ -98,67 +180,12 @@ func (s *Store) Create(ctx context.Context, c Case) (Record, error) {
 		c.Parties[i].Role = strings.TrimSpace(c.Parties[i].Role)
 		c.Parties[i].Name = strings.TrimSpace(c.Parties[i].Name)
 	}
-	if err := c.ValidateFields(); err != nil {
-		return Record{}, err
-	}
-	if c.Court.CourtID == "" {
-		return Record{}, errors.New("계속 법원이 비어 있습니다")
-	}
-
-	court, ok := s.courts[c.Court.CourtID]
-	if !ok {
-		return Record{}, fmt.Errorf("법원 ID %q는 법원 목록에 없습니다", c.Court.CourtID)
-	}
-	if c.Court.PanelName == "" {
-		return Record{}, fmt.Errorf("%s의 재판부가 비어 있습니다", court.Name)
-	}
-	foundPanel := false
-	for _, panel := range court.Panels {
-		if panel.Name == c.Court.PanelName {
-			foundPanel = true
-			break
-		}
-	}
-	if !foundPanel {
-		return Record{}, fmt.Errorf("재판부 %q는 %s 소속이 아닙니다", c.Court.PanelName, court.Name)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return Record{}, err
-	}
-	if s.keys[caseKey(c)] {
-		return Record{}, ErrDuplicateCase
-	}
-	return cloneRecord(s.add(c, court)), nil
-}
-
-// add는 검증이 끝난 사건에 ID를 붙여 저장소 앞에 추가합니다.
-// 동시 접근을 막기 위해 호출하는 쪽에서 쓰기 잠금을 잡아야 합니다.
-func (s *Store) add(c Case, court Court) Record {
-	s.nextID++
-	record := Record{
-		ID:    fmt.Sprintf("case-%04d", s.nextID),
-		Case:  cloneCase(c),
-		Court: cloneCourt(court),
-	}
-	s.list = append([]Record{record}, s.list...)
-	s.byID[record.ID] = record
-	s.keys[caseKey(c)] = true
-	return record
+	return c
 }
 
 // caseKey는 같은 법원 안에서 사건번호가 중복되는지 확인할 때 쓰는 고유 키입니다.
 func caseKey(c Case) string {
 	return c.Court.CourtID + "/" + c.Number.String()
-}
-
-// cloneRecord는 사건의 당사자 목록과 법원의 재판부 목록까지 복사합니다.
-func cloneRecord(record Record) Record {
-	record.Case = cloneCase(record.Case)
-	record.Court = cloneCourt(record.Court)
-	return record
 }
 
 // cloneCase는 내부 슬라이스인 당사자 목록을 복사합니다.

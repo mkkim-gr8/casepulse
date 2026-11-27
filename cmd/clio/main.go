@@ -12,6 +12,7 @@ import (
 
 	leviathanv1 "github.com/mkkim-gr8/casepulse/gen/go/leviathan/v1"
 	"github.com/mkkim-gr8/casepulse/internal/clio"
+	cliopostgres "github.com/mkkim-gr8/casepulse/internal/clio/postgres"
 	cliogrpcserver "github.com/mkkim-gr8/casepulse/internal/cliogrpc/server"
 	"github.com/mkkim-gr8/casepulse/internal/healthcheck"
 	"github.com/mkkim-gr8/casepulse/internal/leviathangrpc"
@@ -23,6 +24,8 @@ import (
 func main() {
 	addr := flag.String("addr", ":9091", "gRPC listen address")
 	leviathanAddr := flag.String("leviathan-addr", envOrDefault("LEVIATHAN_GRPC_ADDR", "localhost:9090"), "Leviathan gRPC address")
+	databaseURL := flag.String("database-url", os.Getenv("DATABASE_URL"), "PostgreSQL URL; empty keeps cases in memory")
+	seedDummy := flag.Bool("seed-dummy", envOrDefault("CLIO_SEED_DUMMY", "true") == "true", "add dummy cases when the store is empty")
 	probe := flag.Bool("healthcheck", false, "check the running service at -addr and exit")
 	flag.Parse()
 
@@ -33,13 +36,13 @@ func main() {
 		}
 		return
 	}
-	if err := run(*addr, *leviathanAddr); err != nil {
+	if err := run(*addr, *leviathanAddr, *databaseURL, *seedDummy); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// run은 Leviathan에서 법원 목록을 받은 뒤 더미 사건을 준비하고 gRPC 서버를 엽니다.
-func run(addr, leviathanAddr string) error {
+// run은 Leviathan에서 법원 목록을 받고 사건 저장소를 준비한 뒤 gRPC 서버를 엽니다.
+func run(addr, leviathanAddr, databaseURL string, seedDummy bool) error {
 	conn, err := grpc.NewClient(leviathanAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return fmt.Errorf("create Leviathan gRPC client: %w", err)
@@ -60,7 +63,22 @@ func run(addr, leviathanAddr string) error {
 	if len(courts) == 0 {
 		return fmt.Errorf("Leviathan gRPC service at %q returned no courts", leviathanAddr)
 	}
-	store := clio.NewStore(clio.BuildDummyCases(courts), courts)
+
+	repo, closeRepo, err := openRepository(ctx, databaseURL)
+	if err != nil {
+		return err
+	}
+	defer closeRepo()
+	store := clio.NewStore(repo, courts)
+	if seedDummy {
+		seeded, err := store.SeedIfEmpty(ctx, clio.BuildDummyCases(courts))
+		if err != nil {
+			return fmt.Errorf("seed dummy cases: %w", err)
+		}
+		if seeded > 0 {
+			log.Printf("seeded %d dummy cases", seeded)
+		}
+	}
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -74,6 +92,35 @@ func run(addr, leviathanAddr string) error {
 		return fmt.Errorf("serve clio gRPC: %w", err)
 	}
 	return nil
+}
+
+// openRepository는 databaseURL이 있으면 PostgreSQL에 연결해 마이그레이션을 적용하고,
+// 없으면 메모리 저장소를 씁니다. DB가 아직 준비되지 않았으면 ctx가 끝날 때까지 다시 시도합니다.
+func openRepository(ctx context.Context, databaseURL string) (clio.Repository, func(), error) {
+	if databaseURL == "" {
+		log.Printf("DATABASE_URL is empty; cases are kept in memory and lost on restart")
+		return clio.NewMemoryRepository(), func() {}, nil
+	}
+	var repo *cliopostgres.Repository
+	for {
+		var err error
+		repo, err = cliopostgres.Open(ctx, databaseURL)
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, nil, fmt.Errorf("open PostgreSQL: %w", err)
+		case <-time.After(time.Second):
+		}
+	}
+	applied, err := repo.Migrate(ctx)
+	if err != nil {
+		repo.Close()
+		return nil, nil, err
+	}
+	log.Printf("connected to PostgreSQL; applied %d new migrations", applied)
+	return repo, repo.Close, nil
 }
 
 // courtsFromProto는 Leviathan 응답을 Clio가 검증에 쓰는 간단한 법원 자료형으로 바꿉니다.
