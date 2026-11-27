@@ -10,7 +10,9 @@ Aegis는 React 화면과 Gin 기반 HTTP API를 제공하는 진입 서비스입
 - 사건 응답에 포함된 법원명·재판부·소재지·우편번호·주소는 Clio가 구성해 반환합니다.
 - Aegis는 Clio와 Leviathan의 도메인 패키지를 가져오지 않습니다. 생성된 Protobuf 계약과 gRPC 클라이언트만 사용합니다.
 
-시작할 때 Aegis는 Leviathan에서 법원 목록을 받고 Clio의 사건 목록을 조회해 두 gRPC 연결을 확인합니다. 연결에 실패하거나 법원 목록이 비어 있으면 시작하지 않습니다.
+시작할 때 Aegis는 Leviathan에서 법원 목록을 받고, Clio에는 표준 gRPC health 확인(`grpc.health.v1.Health/Check`)을 보내 연결을 확인합니다. 각각 최대 30초까지 기다리며, 연결에 실패하거나 법원 목록이 비어 있으면 시작하지 않습니다.
+
+법원 선택 목록은 시작할 때 받은 스냅샷입니다. Leviathan의 법원 데이터를 바꾼 뒤에는 Clio와 함께 Aegis도 재시작해야 새 목록이 등록 화면에 반영됩니다.
 
 ## HTTP API
 
@@ -20,6 +22,7 @@ Aegis는 React 화면과 Gin 기반 HTTP API를 제공하는 진입 서비스입
 | `GET /api/cases/{id}` | 사건 한 건 조회 | `200`, 없으면 `404`, Clio 연결 실패 시 `503` |
 | `POST /api/cases` | 사건 등록 | 성공 시 `201`, 입력 오류 `400`, 중복 `409`, Clio 연결 실패 `503` |
 | `GET /api/courts` | 재판부가 있는 법원 목록 조회 | `200` |
+| `GET /healthz` | 컨테이너 상태 확인 | `200` (요청 로그에 남기지 않음) |
 
 `POST /api/cases`는 다음 필드를 받습니다. 입력 검증과 사건 중복 확인은 Clio가 수행합니다.
 
@@ -42,6 +45,7 @@ HTTP JSON과 gRPC 메시지 사이의 변환 및 경로 등록은 [`api.go`](api
 | `-addr` | `:8080` | HTTP listen 주소 |
 | `LEVIATHAN_GRPC_ADDR` 또는 `-leviathan-addr` | `localhost:9090` | Leviathan gRPC 주소 |
 | `CLIO_GRPC_ADDR` 또는 `-clio-addr` | `localhost:9091` | Clio gRPC 주소 |
+| `-healthcheck` | — | 서버를 켜지 않고 `-addr`의 `/healthz`를 확인한 뒤 종료(성공 0, 실패 1) |
 
 ## 로컬 실행
 
@@ -71,7 +75,7 @@ docker compose up -d --build --wait
 docker compose logs -f aegis
 ```
 
-Compose는 세 서비스를 함께 실행하지만 호스트에는 Aegis의 `8080`만 공개합니다. Aegis는 내부 주소 `clio:9091`, `leviathan:9090`을 사용합니다.
+Compose는 세 서비스를 함께 실행하지만 호스트에는 Aegis의 `8080`만 공개합니다. Aegis는 내부 주소 `clio:9091`, `leviathan:9090`을 사용합니다. Aegis는 Clio와 Leviathan이 healthy가 된 뒤에 시작하며, 자신의 상태는 `/aegis -healthcheck`로 보고합니다.
 
 ## 테스트
 
