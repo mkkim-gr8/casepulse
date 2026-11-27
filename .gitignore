@@ -19,3 +19,7 @@ coverage/
 
 # macOS
 .DS_Store
+# Web frontend (cmd/casepulse-web/web)
+node_modules/
+/cmd/casepulse-web/web/dist/*
+!/cmd/casepulse-web/web/dist/.gitkeep
