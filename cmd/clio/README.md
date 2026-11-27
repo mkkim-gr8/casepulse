@@ -38,6 +38,7 @@ Clio는 사건의 기본 정보를 소유하고 gRPC API로 제공합니다. 사
 |---|---|---|
 | `-addr` | `:9091` | Clio gRPC listen 주소 |
 | `LEVIATHAN_GRPC_ADDR` 또는 `-leviathan-addr` | `localhost:9090` | Leviathan gRPC 주소 |
+| `-healthcheck` | — | 서버를 켜지 않고 `-addr`의 gRPC health 상태를 확인한 뒤 종료(성공 0, 실패 1) |
 
 로컬에서는 Leviathan을 먼저 실행하고 Clio를 시작합니다.
 
@@ -54,6 +55,8 @@ docker compose logs -f clio
 ```
 
 Clio는 개인정보 보호를 위해 요청 로그에 RPC 메서드명만 남기며 사건 요청 본문은 출력하지 않습니다.
+
+Clio는 표준 gRPC health 서비스(`grpc.health.v1.Health`)도 제공합니다. Compose는 이 서비스로 Clio 상태를 확인하고, Aegis는 시작할 때 이 서비스로 Clio 연결을 확인합니다. 주기적인 health 요청은 로그에 남기지 않습니다.
 
 ## 테스트
 

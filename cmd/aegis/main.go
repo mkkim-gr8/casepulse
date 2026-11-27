@@ -28,6 +28,7 @@ import (
 	"github.com/gin-gonic/gin"
 	leviathanv1 "github.com/mkkim-gr8/casepulse/gen/go/leviathan/v1"
 	"github.com/mkkim-gr8/casepulse/internal/cliogrpc"
+	"github.com/mkkim-gr8/casepulse/internal/healthcheck"
 	"github.com/mkkim-gr8/casepulse/internal/leviathangrpc"
 	"github.com/mkkim-gr8/casepulse/web"
 	"google.golang.org/grpc"
@@ -41,10 +42,16 @@ const notBuiltPage = `<!doctype html><meta charset="utf-8"><title>CasePulse</tit
 
 // newHandler는 HTTP API와 빌드된 React 화면을 한 Gin 서버에 등록합니다.
 func newHandler(courts []*leviathanv1.Court, clioClient *cliogrpc.Client) *gin.Engine {
-	router := gin.Default()
+	router := gin.New()
+	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipPaths: []string{"/healthz"}}), gin.Recovery())
 	router.HandleMethodNotAllowed = true
 	router.RedirectTrailingSlash = false
 	newAPIHandlers(clioClient, courts).routes(router)
+	// /healthz는 컨테이너 healthcheck용입니다. 서버는 gRPC 연결을 확인한 뒤에만 열리므로
+	// 응답이 오면 요청을 받을 준비가 된 것입니다.
+	healthz := func(c *gin.Context) { c.String(http.StatusOK, "ok") }
+	router.GET("/healthz", healthz)
+	router.HEAD("/healthz", healthz)
 
 	dist, err := fs.Sub(web.Dist, "dist")
 	if err != nil {
@@ -76,8 +83,16 @@ func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	leviathanAddr := flag.String("leviathan-addr", envOrDefault("LEVIATHAN_GRPC_ADDR", "localhost:9090"), "Leviathan gRPC address")
 	clioAddr := flag.String("clio-addr", envOrDefault("CLIO_GRPC_ADDR", "localhost:9091"), "Clio gRPC address")
+	probe := flag.Bool("healthcheck", false, "check the running server at -addr and exit")
 	flag.Parse()
 
+	if *probe {
+		if err := healthcheck.ProbeHTTP(*addr, "/healthz"); err != nil {
+			log.Printf("healthcheck failed: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(*addr, *leviathanAddr, *clioAddr); err != nil {
 		log.Fatal(err)
 	}
@@ -108,7 +123,7 @@ func run(addr, leviathanAddr, clioAddr string) error {
 	}
 	defer clioConn.Close()
 	clioClient := cliogrpc.NewClient(clioConn)
-	if _, _, err := clioClient.ListCases(ctx, grpc.WaitForReady(true)); err != nil {
+	if err := healthcheck.CheckConn(ctx, clioConn, grpc.WaitForReady(true)); err != nil {
 		return fmt.Errorf("connect to Clio at %q: %w", clioAddr, err)
 	}
 

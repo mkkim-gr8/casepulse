@@ -15,6 +15,7 @@ import (
 	"github.com/mkkim-gr8/casepulse/internal/clio"
 	"github.com/mkkim-gr8/casepulse/internal/cliogrpc"
 	cliogrpcserver "github.com/mkkim-gr8/casepulse/internal/cliogrpc/server"
+	"github.com/mkkim-gr8/casepulse/internal/healthcheck"
 	"github.com/mkkim-gr8/casepulse/internal/leviathangrpc"
 	leviathangrpcserver "github.com/mkkim-gr8/casepulse/internal/leviathangrpc/server"
 	"github.com/mkkim-gr8/casepulse/web"
@@ -72,6 +73,7 @@ func newTestServices(t *testing.T) ([]*leviathanv1.Court, *leviathangrpc.Client,
 	}
 	clioServer := grpc.NewServer()
 	cliogrpcserver.RegisterServer(clioServer, clio.NewStore(clio.BuildDummyCases(courtData), courtData))
+	healthcheck.RegisterGRPC(clioServer)
 	go clioServer.Serve(clioListener)
 	clioConn, err := grpc.NewClient(clioListener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -82,6 +84,11 @@ func newTestServices(t *testing.T) ([]*leviathanv1.Court, *leviathangrpc.Client,
 		clioConn.Close()
 		clioServer.Stop()
 	})
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := healthcheck.CheckConn(ctx, clioConn, grpc.WaitForReady(true)); err != nil {
+		t.Fatalf("Clio health check: %v", err)
+	}
 	return courts, leviathanClient, cliogrpc.NewClient(clioConn)
 }
 
@@ -303,6 +310,13 @@ func TestCreateCaseAPI(t *testing.T) {
 
 	if status, _ := postCase(t, srv.URL, `{"unknown": 1}`); status != http.StatusBadRequest {
 		t.Errorf("unknown field POST = %d, want 400", status)
+	}
+}
+
+func TestHealthz(t *testing.T) {
+	srv := newTestHTTPServer(t)
+	if err := healthcheck.ProbeHTTP(srv.Listener.Addr().String(), "/healthz"); err != nil {
+		t.Fatalf("GET /healthz: %v", err)
 	}
 }
 

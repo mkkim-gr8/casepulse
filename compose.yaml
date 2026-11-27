@@ -1,3 +1,10 @@
+x-healthcheck: &healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+  start_interval: 1s
+
 services:
   leviathan:
     build:
@@ -5,6 +12,9 @@ services:
       dockerfile: cmd/leviathan/Dockerfile
     expose:
       - "9090"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/leviathan", "-healthcheck"]
 
   clio:
     build:
@@ -13,9 +23,13 @@ services:
     environment:
       LEVIATHAN_GRPC_ADDR: leviathan:9090
     depends_on:
-      - leviathan
+      leviathan:
+        condition: service_healthy
     expose:
       - "9091"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/clio", "-healthcheck"]
 
   aegis:
     build:
@@ -25,7 +39,12 @@ services:
       LEVIATHAN_GRPC_ADDR: leviathan:9090
       CLIO_GRPC_ADDR: clio:9091
     depends_on:
-      - clio
-      - leviathan
+      clio:
+        condition: service_healthy
+      leviathan:
+        condition: service_healthy
     ports:
       - "8080:8080"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/aegis", "-healthcheck"]

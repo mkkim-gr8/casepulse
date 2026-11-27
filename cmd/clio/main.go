@@ -13,6 +13,7 @@ import (
 	leviathanv1 "github.com/mkkim-gr8/casepulse/gen/go/leviathan/v1"
 	"github.com/mkkim-gr8/casepulse/internal/clio"
 	cliogrpcserver "github.com/mkkim-gr8/casepulse/internal/cliogrpc/server"
+	"github.com/mkkim-gr8/casepulse/internal/healthcheck"
 	"github.com/mkkim-gr8/casepulse/internal/leviathangrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -22,8 +23,16 @@ import (
 func main() {
 	addr := flag.String("addr", ":9091", "gRPC listen address")
 	leviathanAddr := flag.String("leviathan-addr", envOrDefault("LEVIATHAN_GRPC_ADDR", "localhost:9090"), "Leviathan gRPC address")
+	probe := flag.Bool("healthcheck", false, "check the running service at -addr and exit")
 	flag.Parse()
 
+	if *probe {
+		if err := healthcheck.ProbeGRPC(*addr); err != nil {
+			log.Printf("healthcheck failed: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(*addr, *leviathanAddr); err != nil {
 		log.Fatal(err)
 	}
@@ -59,6 +68,7 @@ func run(addr, leviathanAddr string) error {
 	}
 	server := grpc.NewServer(grpc.UnaryInterceptor(logGRPCRequest))
 	cliogrpcserver.RegisterServer(server, store)
+	healthcheck.RegisterGRPC(server)
 	log.Printf("clio gRPC service listening on %s", addr)
 	if err := server.Serve(listener); err != nil {
 		return fmt.Errorf("serve clio gRPC: %w", err)
@@ -91,7 +101,11 @@ func courtsFromProto(source []*leviathanv1.Court) ([]clio.Court, error) {
 }
 
 // logGRPCRequest는 요청 메서드만 기록해 사건 개인정보가 로그에 남지 않게 합니다.
+// 주기적으로 반복되는 health 확인 요청은 기록하지 않습니다.
 func logGRPCRequest(ctx context.Context, request any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	if healthcheck.IsHealthMethod(info.FullMethod) {
+		return handler(ctx, request)
+	}
 	log.Printf("gRPC request: method=%s", info.FullMethod)
 	return handler(ctx, request)
 }
