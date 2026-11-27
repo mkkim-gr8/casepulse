@@ -39,11 +39,30 @@ docker compose up -d --build --wait
 | `internal/healthcheck/` | gRPC health 서비스 등록과 컨테이너 healthcheck용 점검 함수 |
 | `internal/leviathan/addresses.go` | 서비스 내 기관 주소 표를 적용하는 공통 도우미 |
 | `web/` | 사건목록 웹 화면(React + shadcn/ui, Vite) 및 Go 정적 파일 임베드 패키지 |
-| `compose.yaml` | 웹·Clio·Leviathan 세 컨테이너 구성과 healthcheck |
+| `compose.yaml` | 웹·Clio·Leviathan 세 컨테이너와 개발용 PostgreSQL 구성, healthcheck |
+| `.env.example` | 개발용 PostgreSQL 접속 정보 예시 |
 
 서비스별 실행·구현 문서는 [Clio](cmd/clio/README.md), [Leviathan](cmd/leviathan/README.md), [Aegis](cmd/aegis/README.md)를 참고합니다.
 
 Leviathan의 기관 목록은 패키지가 로드될 때 한 번 만들어지며, 표 사이의 값이 맞지 않으면(없는 상위 ID 참조, 주소 누락 등) 패닉을 일으켜 잘못된 데이터가 배포되지 않도록 합니다. `go test -v ./internal/leviathan -run PrintsTree`로 법원·공소청 트리를 출력해 데이터를 검토할 수 있습니다.
+
+## 개발용 PostgreSQL
+
+앞으로 사건 데이터를 저장할 개발용 PostgreSQL 19를 Compose의 `postgres` 서비스로 제공합니다. 아직 Clio는 이 DB를 사용하지 않고 메모리 저장소를 씁니다.
+
+```sh
+docker compose up -d --wait postgres   # DB만 실행
+docker compose exec postgres psql -U casepulse -d casepulse
+```
+
+| 항목 | 기본값 |
+|---|---|
+| 호스트·포트 | `127.0.0.1:5432` (이 컴퓨터에서만 접속 가능) |
+| 데이터베이스·사용자·비밀번호 | `casepulse` / `casepulse` / `casepulse` |
+| 접속 URL | `postgres://casepulse:casepulse@localhost:5432/casepulse?sslmode=disable` |
+| Compose 내부 주소 | `postgres:5432` |
+
+기본값은 개발용입니다. 바꾸려면 `.env.example`을 `.env`로 복사해 수정합니다. `.env`는 Git에 올리지 않습니다. 데이터는 이름 있는 볼륨 `postgres-data`에 저장되므로 `docker compose down`으로 컨테이너를 지워도 남습니다. DB를 처음 상태로 되돌리려면 `docker compose down -v`로 볼륨까지 지웁니다. 사용자와 비밀번호는 볼륨을 처음 만들 때만 적용되므로, `.env`의 값을 바꾼 뒤에도 볼륨을 지워야 반영됩니다.
 
 ## 법원 정보
 
