@@ -6,6 +6,13 @@ package main
 //	GET  /api/cases/{id}  Clio gRPC 서비스의 사건 한 건
 //	POST /api/cases       Clio gRPC 서비스에 사건 등록
 //	GET  /api/courts      사건 등록 화면에서 고를 법원과 재판부 이름
+//
+// 핸들러는 공통적으로 다음 일을 합니다.
+//  1. 브라우저가 보낸 HTTP 요청(경로·JSON 본문)을 읽습니다.
+//  2. gRPC 요청 메시지로 바꿔 Clio를 호출합니다.
+//  3. gRPC 응답을 화면이 쓰기 좋은 JSON(caseView 등)으로 바꿔 돌려줍니다.
+//  4. gRPC 오류 코드를 알맞은 HTTP 상태 코드로 바꿉니다(NotFound→404, InvalidArgument→400,
+//     AlreadyExists→409, 그 밖→503).
 
 import (
 	"context"
@@ -36,6 +43,9 @@ var categoryLabels = map[string]string{
 }
 
 // partyView는 HTTP JSON으로 주고받을 당사자 정보입니다.
+//
+// 필드 뒤의 `json:"role"` 같은 표시(태그)는 JSON으로 바꿀 때 쓸 키 이름입니다.
+// Go 필드는 대문자(Role)로 시작해야 밖에서 읽을 수 있지만, JSON은 소문자 키(role)를 쓰기 위해 붙입니다.
 type partyView struct {
 	Role   string `json:"role"`
 	Name   string `json:"name"`
@@ -53,6 +63,7 @@ type courtView struct {
 }
 
 // caseView는 gRPC 사건 응답을 웹 화면에 맞는 JSON 모양으로 바꾼 자료입니다.
+// 화면에서 바로 쓰도록 사건번호 문자열(Number)과 사건 종류 한글 이름(CategoryLabel)을 미리 만들어 넣습니다.
 type caseView struct {
 	ID            string      `json:"id"`
 	Number        string      `json:"number"`
@@ -99,13 +110,18 @@ type apiHandlers struct {
 func newAPIHandlers(clioClient *cliogrpc.Client, courts []*leviathanv1.Court) *apiHandlers {
 	return &apiHandlers{
 		clio:   clioClient,
-		courts: append([]*leviathanv1.Court(nil), courts...),
+		courts: append([]*leviathanv1.Court(nil), courts...), // 호출한 쪽 슬라이스와 분리하기 위해 복사
 	}
 }
 
 // routes는 사건 API와 법원 선택 API의 URL 경로를 Gin 서버에 등록합니다.
+//
+// 각 핸들러는 func(c *gin.Context) 모양의 함수입니다. c에서 요청 정보를 읽고(c.Param, c.Request),
+// c.JSON(상태코드, 값)으로 응답을 씁니다. HEAD 요청은 본문 없이 헤더만 돌려주는 GET이라 같은 함수를 씁니다.
 func (h *apiHandlers) routes(router *gin.Engine) {
+	// GET /api/cases: 사건 전체 목록
 	listCases := func(c *gin.Context) {
+		// 브라우저 요청의 context를 바탕으로 5초 제한을 겁니다. 브라우저가 연결을 끊으면 Clio 호출도 취소됩니다.
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 		cases, total, err := h.clio.ListCases(ctx, grpc.WaitForReady(true))
@@ -122,11 +138,13 @@ func (h *apiHandlers) routes(router *gin.Engine) {
 			}
 			views[i] = view
 		}
+		// map[string]any는 키가 문자열이고 값은 아무 타입이나 되는 사전입니다. JSON 객체 {"cases": [...], "total": 240}이 됩니다.
 		c.JSON(http.StatusOK, map[string]any{"cases": views, "total": total})
 	}
 	router.GET("/api/cases", listCases)
 	router.HEAD("/api/cases", listCases)
 
+	// GET /api/cases/:id: 사건 한 건. ":id" 자리의 값은 c.Param("id")로 읽습니다.
 	getCase := func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
@@ -149,9 +167,12 @@ func (h *apiHandlers) routes(router *gin.Engine) {
 	router.GET("/api/cases/:id", getCase)
 	router.HEAD("/api/cases/:id", getCase)
 
+	// POST /api/cases: 사건 등록
 	router.POST("/api/cases", func(c *gin.Context) {
 		var req createCaseRequest
+		// 요청 본문 크기를 1MB(1<<20 바이트)로 제한해 너무 큰 요청으로 서버가 힘들어지는 것을 막습니다.
 		dec := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20))
+		// 정의하지 않은 필드가 오면 오류로 처리합니다(오타 난 필드를 조용히 무시하지 않기 위해).
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
 			c.JSON(http.StatusBadRequest, map[string]any{"errors": []string{"요청 형식이 올바르지 않습니다: " + err.Error()}})
@@ -162,6 +183,7 @@ func (h *apiHandlers) routes(router *gin.Engine) {
 		defer cancel()
 		item, err := h.clio.CreateCase(ctx, caseInputFromRequest(req), grpc.WaitForReady(true))
 		if err != nil {
+			// status.Code(err)는 gRPC 오류에서 상태 코드를 꺼냅니다.
 			switch status.Code(err) {
 			case codes.InvalidArgument:
 				c.JSON(http.StatusBadRequest, map[string]any{"errors": errorMessages(status.Convert(err).Message())})
@@ -177,9 +199,10 @@ func (h *apiHandlers) routes(router *gin.Engine) {
 			h.serviceUnavailable(c, "decode created case", err)
 			return
 		}
-		c.JSON(http.StatusCreated, view)
+		c.JSON(http.StatusCreated, view) // 201 Created: 새 자원을 만들었다는 뜻
 	})
 
+	// GET /api/courts: 등록 화면의 법원·재판부 선택지. 시작할 때 받은 목록을 그대로 씁니다.
 	listCourts := func(c *gin.Context) {
 		c.JSON(http.StatusOK, map[string]any{"courts": courtOptions(h.courts)})
 	}
@@ -188,6 +211,7 @@ func (h *apiHandlers) routes(router *gin.Engine) {
 }
 
 // serviceUnavailable은 gRPC 호출 실패를 서버 로그에 남기고 브라우저에는 503을 돌려줍니다.
+// 자세한 내부 오류는 화면에 보여 주지 않고 로그에만 남깁니다(내부 구조 노출 방지).
 func (h *apiHandlers) serviceUnavailable(c *gin.Context, operation string, err error) {
 	log.Printf("Clio %s failed: %v", operation, err)
 	c.JSON(http.StatusServiceUnavailable, map[string]any{"errors": []string{"사건 서비스를 사용할 수 없습니다"}})

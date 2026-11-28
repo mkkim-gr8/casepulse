@@ -25,8 +25,10 @@ export function Combobox({
   invalid,
   className,
 }) {
-  const [open, setOpen] = useState(false);
-  const selected = items.find((x) => getKey(x) === value);
+  const [open, setOpen] = useState(false); // 목록 팝업이 열려 있는지
+  const selected = items.find((x) => getKey(x) === value); // 현재 선택된 항목(없으면 undefined)
+
+  // 구조: PopoverTrigger(누르는 버튼) → PopoverContent(떠오르는 상자) 안에 Command(검색창 + 목록).
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -44,6 +46,7 @@ export function Combobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-(--radix-popover-trigger-width) p-0" align="start">
+        {/* filter는 항목마다 호출되어 1이면 보이고 0이면 숨깁니다. 띄어쓰기를 무시하고 포함 여부로 비교합니다. */}
         <Command filter={(itemValue, search) => (normalize(itemValue).includes(normalize(search)) ? 1 : 0)}>
           <CommandInput placeholder={searchPlaceholder} />
           <CommandList>

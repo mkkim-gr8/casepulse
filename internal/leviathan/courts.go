@@ -18,6 +18,9 @@ import (
 
 // courtDirectory는 패키지가 처음 로드될 때 buildCourtDirectory로 한 번 만든 법원 원본 목록입니다.
 // 외부에는 직접 내보내지 않고 Courts가 복사본을 돌려줍니다.
+//
+// Go에서 패키지 수준 변수(함수 밖의 var)는 main 함수가 시작되기 전에 초기화됩니다.
+// 그래서 서버가 요청을 받기 전에 목록이 이미 완성되어 있고, 데이터 오류가 있으면 시작하자마자 패닉으로 멈춥니다.
 var courtDirectory = buildCourtDirectory()
 
 // Courts는 전국 법원 목록(대법원부터 시·군법원까지)을 반환합니다.
@@ -68,6 +71,8 @@ func buildCourtDirectory() []Court {
 	//   - seat: 별표에 적힌 소재지
 	//   - jurisdictions: 관할 지역(가변 인자이므로 add(..., "A시", "B군")처럼 여러 개를 넘깁니다)
 	// 우편번호·주소·재판부는 여기서 넣지 않고 5·6단계에서 채웁니다.
+	//
+	// add처럼 함수 안에서 만든 함수(클로저)는 바깥 변수 courts를 직접 읽고 고칠 수 있습니다.
 	add := func(id, name string, level CourtLevel, courtType CourtType, unit CourtUnitType, parentID, seat string, jurisdictions ...string) {
 		courts = append(courts, Court{
 			Institution: Institution{ID: id, Name: name, Type: InstitutionTypeCourt},
@@ -82,6 +87,7 @@ func buildCourtDirectory() []Court {
 	add("court-supreme", "대법원", CourtLevelSupreme, CourtTypeGeneral, CourtUnitTypeMain, "", "서울특별시", "전국")
 
 	// 고등법원(별표 1). 각 행은 {짧은 식별자, 공식 명칭, 소재지}이며 모두 대법원 소속입니다.
+	// []struct{...}{...}는 이름 없는 구조체로 작은 표를 바로 만들어 반복하는 Go의 흔한 방식입니다.
 	// 고등법원의 관할 지역은 소속 지방법원들의 관할을 합친 것이므로 따로 적지 않습니다.
 	for _, court := range []struct {
 		id, name, seat string

@@ -27,11 +27,17 @@ const ROLE_SUGGESTIONS = {
 };
 
 // "2026가합12345"처럼 한 줄로 쓴 사건번호를 나눕니다. 형식이 아니면 null입니다.
+// 정규식 풀이: (\d{4}) 숫자 4개 = 연도, ([가-힣]+) 한글 1자 이상 = 사건부호, (\d+) 숫자 1개 이상 = 일련번호.
+// \s*는 사이사이 공백을 허용합니다. 괄호로 묶은 부분은 match 결과의 m[1], m[2], m[3]으로 꺼낼 수 있습니다.
 const NUMBER_PATTERN = /^\s*(\d{4})\s*([가-힣]+)\s*(\d+)\s*$/;
 
+// 당사자 행마다 붙이는 고유 번호입니다. 행을 지우거나 추가해도 React가 각 행을 정확히 구분하도록 key로 씁니다.
+// (배열 위치를 key로 쓰면 중간 행을 지울 때 입력값이 엉뚱한 행으로 옮겨 보일 수 있습니다.)
 let partyKeySeq = 0;
 const newParty = () => ({ key: ++partyKeySeq, role: "", name: "", client: false });
 
+// initialForm은 새 등록 탭의 빈 입력값입니다. 연도는 올해로, 당사자는 빈 행 두 개(보통 원고·피고)로 시작합니다.
+// 입력칸의 값은 숫자도 문자열로 보관하고, 서버로 보낼 때 Number()로 바꿉니다.
 function initialForm() {
   return {
     year: String(new Date().getFullYear()),
@@ -46,11 +52,15 @@ function initialForm() {
 }
 
 // 비교용 값: 당사자 key처럼 화면에서만 쓰는 값은 빼고, 입력한 내용만 남깁니다.
+// 처음 값의 snapshot과 지금 값의 snapshot이 다르면 "저장하지 않은 내용이 있음(dirty)"으로 봅니다.
 const snapshot = (f) => JSON.stringify({ ...f, parties: f.parties.map(({ role, name, client }) => ({ role, name, client })) });
 
 // Clio 서버 검사와 같은 규칙을 화면에서 먼저 확인합니다. 입력칸별 오류 메시지를 돌려줍니다.
+// 화면 검사는 사용자 편의를 위한 것이고, 최종 판단은 항상 서버(Clio)가 합니다.
+// 반환값: { errors: 항목별 오류 메시지, hasError: 오류가 하나라도 있는지 }
 function validate(f) {
   const e = {};
+  // /^\d{4}$/.test(값): 값이 처음(^)부터 끝($)까지 숫자 4개인지 확인합니다.
   if (!/^\d{4}$/.test(f.year)) e.year = "연도는 4자리 숫자입니다";
   if (!/^[가-힣]+$/.test(f.code.trim())) e.code = "사건부호는 한글로 입력합니다";
   if (!/^[1-9]\d*$/.test(f.serial)) e.serial = "일련번호는 1 이상의 숫자입니다";
@@ -67,6 +77,7 @@ function validate(f) {
   else if (!f.parties.some((p) => p.client)) e.parties = "의뢰인인 당사자를 한 명 이상 표시하세요";
   if (!f.courtId) e.court = "계속 법원을 고르세요";
   if (!f.panel) e.panel = "재판부를 고르세요";
+  // partyRows는 항상 들어 있으므로 따로 확인하고, 나머지 키는 하나라도 있으면 오류입니다.
   const hasError =
     Object.keys(e).some((k) => k !== "partyRows") || e.partyRows.some((r) => r.role || r.name);
   return { errors: e, hasError };
@@ -93,49 +104,60 @@ function Field({ label, htmlFor, required, error, hint, className, children }) {
 //   - onCreated(사건): 등록에 성공했을 때 호출됩니다.
 //   - onCancel(): 취소 버튼을 눌렀을 때 호출됩니다(저장하지 않은 내용 확인은 탭을 닫는 쪽에서 합니다).
 export default function CaseForm({ formId, courts, courtsError, active, defaultLabel, onStatus, onCreated, onCancel }) {
-  const [form, setForm] = useState(initialForm);
-  const [initial] = useState(() => snapshot(form));
-  const [submitted, setSubmitted] = useState(false);
-  const [serverErrors, setServerErrors] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const yearRef = useRef(null);
+  const [form, setForm] = useState(initialForm); // 지금 입력한 값 전체
+  const [initial] = useState(() => snapshot(form)); // 처음 값(바뀌었는지 비교용, 다시 바꾸지 않음)
+  const [submitted, setSubmitted] = useState(false); // 등록 버튼을 한 번이라도 눌렀는지
+  const [serverErrors, setServerErrors] = useState([]); // 서버가 거절한 이유 목록
+  const [saving, setSaving] = useState(false); // 서버에 보내는 중인지(버튼 잠금용)
+  const yearRef = useRef(null); // 탭을 열면 연도 칸에 바로 커서를 두기 위한 참조
 
+  // set({ title: "사기" })처럼 바꿀 칸만 넘기면 나머지 값은 그대로 두고 그 칸만 바꿉니다.
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+  // setParty(key, { name: "홍길동" }): key가 같은 당사자 행만 바꾸고 나머지 행은 그대로 둡니다.
   const setParty = (key, patch) =>
     setForm((f) => ({ ...f, parties: f.parties.map((p) => (p.key === key ? { ...p, ...patch } : p)) }));
 
+  // 입력할 때마다(화면을 다시 그릴 때마다) 검사를 다시 계산합니다.
   const { errors, hasError } = validate(form);
+  // 입력하자마자 빨간 오류가 뜨면 불편하므로, 일반 오류는 등록 버튼을 누른 뒤부터 보여 줍니다.
+  // (이해충돌 경고 errors.conflict만은 show를 거치지 않고 즉시 보여 줍니다.)
   const show = (msg) => (submitted ? msg : null);
   const dirty = snapshot(form) !== initial;
+  // 사건번호 세 칸이 모두 올바르면 "2026가합12345"를 만들어 탭 제목으로 씁니다.
   const numberText =
     /^\d{4}$/.test(form.year) && form.code.trim() && /^[1-9]\d*$/.test(form.serial)
       ? `${form.year}${form.code.trim()}${form.serial}`
       : "";
   const label = numberText || defaultLabel;
 
+  // dirty나 탭 제목이 바뀔 때마다 App에 알립니다(탭의 주황 점·제목·닫기 확인에 씀).
   useEffect(() => onStatus({ dirty, label }), [dirty, label]);
+  // 이 탭이 보이게 되면 연도 칸에 커서를 둡니다.
   useEffect(() => {
     if (active) yearRef.current?.focus();
   }, [active]);
 
   const selectedCourt = useMemo(() => courts?.find((c) => c.id === form.courtId) ?? null, [courts, form.courtId]);
   const clientCount = form.parties.filter((p) => p.client).length;
+  // 등록 탭이 여러 개 동시에 열릴 수 있으므로, HTML id가 겹치지 않게 탭 id(formId)를 앞에 붙입니다.
   const roleListId = `role-options-${formId}`;
   const id = (name) => `${formId}-${name}`;
 
   // 사건번호 칸 어디에든 "2026가합12345"를 붙여 넣으면 세 칸으로 나눠 넣습니다.
   const onNumberPaste = (e) => {
     const m = e.clipboardData.getData("text").match(NUMBER_PATTERN);
-    if (!m) return;
-    e.preventDefault();
+    if (!m) return; // 형식이 아니면 평소처럼 붙여 넣습니다.
+    e.preventDefault(); // 브라우저의 기본 붙여넣기를 막고 직접 세 칸에 나눠 넣습니다.
     set({ year: m[1], code: m[2], serial: m[3] });
   };
 
+  // 등록: 화면 검사를 통과하면 서버에 보내고, 성공하면 onCreated, 실패하면 서버 오류를 보여 줍니다.
   const submit = async () => {
-    setSubmitted(true);
+    setSubmitted(true); // 이제부터 입력칸 오류를 보여 줍니다.
     setServerErrors([]);
     if (hasError) return;
     setSaving(true);
+    // 문자열로 보관한 숫자는 Number()로 바꾸고, 앞뒤 공백을 지워 서버 API 형식(createCaseRequest)에 맞춥니다.
     const result = await createCase({
       number: { year: Number(form.year), code: form.code.trim(), serial: Number(form.serial) },
       title: form.title.trim(),
@@ -150,6 +172,9 @@ export default function CaseForm({ formId, courts, courtsError, active, defaultL
 
   // Ctrl+Enter(맥은 Cmd+Enter)로 등록합니다. 법원·재판부를 고른 직후처럼 입력칸에 포커스가 없어도
   // 이 탭이 보이는 동안에는 동작하도록 창 전체에서 키를 받습니다.
+  //
+  // submitRef를 쓰는 이유: 이벤트 등록(useEffect)은 active가 바뀔 때만 다시 하므로, submit을 직접 쓰면
+  // 처음 등록할 때의 오래된 submit(옛 입력값)을 부르게 됩니다. 매번 ref에 최신 submit을 넣어 두고 그것을 부릅니다.
   const submitRef = useRef(submit);
   submitRef.current = submit;
   useEffect(() => {
@@ -164,6 +189,7 @@ export default function CaseForm({ formId, courts, courtsError, active, defaultL
     return () => window.removeEventListener("keydown", onKey);
   }, [active]);
 
+  // 사건번호 세 칸의 오류 중 첫 번째 것 하나만 칸 아래에 보여 줍니다.
   const numberError = show(errors.year || errors.code || errors.serial);
 
   return (
@@ -193,6 +219,7 @@ export default function CaseForm({ formId, courts, courtsError, active, defaultL
                     maxLength={4}
                     value={form.year}
                     aria-invalid={!!show(errors.year) || undefined}
+                    // /\D/g는 숫자가 아닌 모든 글자입니다. 숫자 외의 입력은 지워서 숫자만 남깁니다.
                     onChange={(e) => set({ year: e.target.value.replace(/\D/g, "") })}
                     onPaste={onNumberPaste}
                   />
@@ -321,6 +348,7 @@ export default function CaseForm({ formId, courts, courtsError, active, defaultL
                   })}
                 </TableBody>
               </Table>
+              {/* datalist는 입력칸(list 속성으로 연결)에 추천 값을 보여 주는 HTML 기능입니다. 사건 종류에 맞는 지위를 추천합니다. */}
               <datalist id={roleListId}>
                 {(ROLE_SUGGESTIONS[form.category] ?? ROLE_SUGGESTIONS.civil).map((r) => (
                   <option key={r} value={r} />
@@ -368,6 +396,7 @@ export default function CaseForm({ formId, courts, courtsError, active, defaultL
                   <Combobox
                     items={courts ?? []}
                     value={form.courtId}
+                    // 법원을 바꾸면 이전 법원의 재판부는 맞지 않으므로 재판부 선택을 비웁니다.
                     onChange={(courtId) => set({ courtId, panel: "" })}
                     getKey={(c) => c.id}
                     getLabel={(c) => c.name}
@@ -384,6 +413,7 @@ export default function CaseForm({ formId, courts, courtsError, active, defaultL
                   error={show(errors.panel)}
                   hint={selectedCourt ? null : "법원을 먼저 고르세요"}
                 >
+                  {/* key를 법원 ID로 주면 법원이 바뀔 때 재판부 선택 상자를 새로 만들어 검색어 등이 초기화됩니다. */}
                   <Combobox
                     key={form.courtId}
                     items={selectedCourt?.panels ?? []}

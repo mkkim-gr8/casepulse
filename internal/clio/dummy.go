@@ -1,11 +1,19 @@
 package clio
 
-// 이 파일은 데이터베이스가 생기기 전까지 쓸 더미 사건 목록을 만듭니다.
+// 이 파일은 개발·시연용 더미 사건 목록을 만듭니다. Clio가 시작할 때 저장소(메모리 또는 PostgreSQL)가
+// 비어 있으면 Store.SeedIfEmpty로 이 목록을 한 번 넣습니다(CLIO_SEED_DUMMY=false로 끌 수 있음).
 //
 // 사건번호·당사자·사건명은 모두 지어낸 값이며 실제 사건과 관계없습니다.
 // 법원과 재판부는 Leviathan gRPC 서비스의 목록에서 사건 종류에 맞는 것을 고르므로,
-// 만든 사건은 모두 Case.Validate를 통과해야 합니다(통과하지 못하면 패닉).
+// 만든 사건은 모두 Case.ValidateFields를 통과해야 합니다(통과하지 못하면 패닉).
+// 법원·재판부 소속은 SeedIfEmpty가 저장 전에 한 번 더 검사합니다.
 // 난수 생성기의 시작값(시드)을 고정해, 서버를 다시 켜도 같은 목록이 만들어집니다.
+//
+// 만드는 흐름(BuildDummyCases):
+//  1. 사건 종류(민사·민사신청·가사·행정·형사)를 weight 비율에 따라 고릅니다.
+//  2. 그 종류를 맡을 수 있는 법원과 재판부를 고릅니다(choicesFor, pickCourt).
+//  3. 당사자를 만들고(parties), 그중 의뢰인을 표시합니다(markClients).
+//  4. 사건번호·사건명을 무작위로 정하고, 같은 법원에 같은 번호가 이미 있으면 다시 뽑습니다.
 
 import (
 	"fmt"
@@ -21,7 +29,9 @@ type caseTemplate struct {
 	category CaseCategory
 	// weight는 전체 더미 사건 중 이 종류가 뽑힐 상대 비율입니다.
 	weight int
-	codes  []string
+	// codes는 이 종류에서 쓸 사건부호 후보입니다(예: 민사는 "가합", "가단", "가소").
+	codes []string
+	// titles는 사건명 후보입니다.
 	titles []string
 	// court는 이 종류의 사건을 맡을 수 있는 법원인지 판단합니다.
 	court func(*Court) bool
@@ -33,6 +43,7 @@ type caseTemplate struct {
 	clientRoles []string
 }
 
+// 더미 당사자 이름을 만들 때 쓰는 재료입니다. 모두 지어낸 값입니다.
 var (
 	surnames   = []string{"김", "이", "박", "최", "정", "강", "조", "윤", "장", "임", "한", "오", "서", "신", "권", "황", "안", "송", "류", "홍"}
 	givenNames = []string{"민준", "서연", "도윤", "하은", "시우", "지유", "주원", "서윤", "예준", "지민", "하준", "수아", "건우", "채원", "현우", "지아", "우진", "다은", "선우", "유나"}
@@ -40,10 +51,13 @@ var (
 	agencies   = []string{"서울특별시장", "경기도지사", "강남구청장", "중부지방국세청장", "서울지방고용노동청장", "국민건강보험공단", "근로복지공단", "서초세무서장", "인천광역시 남동구청장", "부산광역시장"}
 )
 
+// personName은 성과 이름을 하나씩 무작위로 골라 붙입니다(예: "김민준").
+// r.IntN(n)은 0 이상 n 미만의 정수 하나를 무작위로 돌려줍니다.
 func personName(r *rand.Rand) string {
 	return surnames[r.IntN(len(surnames))] + givenNames[r.IntN(len(givenNames))]
 }
 
+// companyName은 "주식회사 한빛건설" 같은 회사 이름을 만듭니다.
 func companyName(r *rand.Rand) string {
 	return "주식회사 " + companies[r.IntN(len(companies))]
 }
@@ -57,6 +71,7 @@ func personOrCompany(r *rand.Rand) string {
 }
 
 // sides는 앞 지위 a명, 뒤 지위 b명의 당사자를 만듭니다. 같은 지위가 여러 명이면 "피고1", "피고2"처럼 번호를 붙입니다.
+// nameA·nameB는 이름을 만드는 함수입니다. Go에서는 함수도 값처럼 다른 함수에 넘길 수 있습니다.
 func sides(r *rand.Rand, roleA string, a int, nameA func(*rand.Rand) string, roleB string, b int, nameB func(*rand.Rand) string) []Party {
 	var parties []Party
 	add := func(role string, n int, name func(*rand.Rand) string) {
@@ -94,11 +109,13 @@ func markClients(r *rand.Rand, parties []Party, clientRoles []string) {
 	}
 	marked := 0
 	for _, i := range side {
+		// 같은 쪽 당사자마다 60% 확률로 의뢰인으로 표시합니다.
 		if r.IntN(10) < 6 {
 			parties[i].Client = true
 			marked++
 		}
 	}
+	// 한 명도 뽑히지 않았으면 그 쪽에서 한 명을 골라 의뢰인으로 해서, 의뢰인이 최소 1명은 있게 합니다.
 	if marked == 0 {
 		parties[side[r.IntN(len(side))]].Client = true
 	}
@@ -116,10 +133,13 @@ func partyCount(r *rand.Rand) int {
 	}
 }
 
+// isGeneralDistrict는 일반 지방법원(본원·지원)인지 확인합니다. 민사·형사 사건은 이런 법원에 둡니다.
 func isGeneralDistrict(c *Court) bool {
 	return c.Level == "district" && c.CourtType == "general"
 }
 
+// caseTemplates는 사건 종류별 더미 재료 표입니다. weight를 모두 더하면 100이므로 각 값이 곧 백분율입니다
+// (민사 40%, 민사신청 15%, 가사 15%, 행정 10%, 형사 20%).
 var caseTemplates = []caseTemplate{
 	{
 		category: CaseCategoryCivil, weight: 40,
@@ -161,6 +181,7 @@ var caseTemplates = []caseTemplate{
 	},
 	{
 		category: CaseCategoryAdministrative, weight: 10,
+		// "원고"를 세 번 넣어 행정사건은 원고(국민) 쪽을 대리하는 경우가 3/4이 되게 합니다.
 		clientRoles: []string{"원고", "원고", "원고", "피고"},
 		codes:       []string{"구합", "구단"},
 		titles:      []string{"영업정지처분취소", "부당해고구제재심판정취소", "종합소득세부과처분취소", "요양불승인처분취소", "건축허가취소처분취소", "정보공개거부처분취소"},
@@ -197,6 +218,7 @@ func choicesFor(t caseTemplate, courts []Court) []courtChoice {
 		if !t.court(&c) {
 			continue
 		}
+		// 키워드를 앞에서부터 차례로 시도해, 처음으로 맞는 재판부가 있는 키워드에서 멈춥니다(break).
 		for _, kw := range t.panelKeywords {
 			var panels []string
 			for _, p := range c.Panels {
@@ -219,6 +241,7 @@ func choicesFor(t caseTemplate, courts []Court) []courtChoice {
 // BuildDummyCases는 전달받은 법원 목록으로 더미 사건을 만듭니다.
 // 사건번호는 법원 안에서 겹치지 않습니다.
 func BuildDummyCases(courts []Court) []Case {
+	// 시드를 고정한 난수 생성기입니다. 같은 시드면 항상 같은 순서의 "무작위" 값이 나옵니다.
 	r := rand.New(rand.NewPCG(20261127, 1))
 
 	choices := make([][]courtChoice, len(caseTemplates))
@@ -230,6 +253,7 @@ func BuildDummyCases(courts []Court) []Case {
 
 	// 실제 업무처럼 일부 법원에 사건이 몰리도록, 각 종류마다 앞쪽(주요) 법원 몇 곳을 자주 고릅니다.
 	pickCourt := func(cs []courtChoice) courtChoice {
+		// 2/3 확률로 앞쪽 최대 6곳 중에서, 1/3 확률로 전체 중에서 고릅니다.
 		if r.IntN(3) > 0 {
 			return cs[r.IntN(min(6, len(cs)))]
 		}
@@ -239,6 +263,8 @@ func BuildDummyCases(courts []Court) []Case {
 	seen := make(map[string]bool)
 	cases := make([]Case, 0, dummyCaseCount)
 	for len(cases) < dummyCaseCount {
+		// 가중치 뽑기: 0~(합계-1) 사이의 수 n을 뽑고, 각 종류의 weight를 빼 나가다가
+		// n이 weight보다 작아지는 종류를 고릅니다. weight가 큰 종류일수록 자주 뽑힙니다.
 		n := r.IntN(totalWeight)
 		ti := 0
 		for n >= caseTemplates[ti].weight {
@@ -263,7 +289,7 @@ func BuildDummyCases(courts []Court) []Case {
 		}
 		key := cc.courtID + "/" + c.Number.String()
 		if seen[key] {
-			continue
+			continue // 같은 법원에 같은 사건번호가 이미 있으면 버리고 다시 뽑습니다.
 		}
 		seen[key] = true
 		if err := c.ValidateFields(); err != nil {

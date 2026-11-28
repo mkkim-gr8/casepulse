@@ -44,7 +44,7 @@ docker compose up -d --build --wait
 | `compose.yaml` | 웹·Clio·Leviathan 세 컨테이너와 개발용 PostgreSQL 구성, healthcheck |
 | `.env.example` | 개발용 PostgreSQL 접속 정보 예시 |
 
-서비스별 실행·구현 문서는 [Clio](cmd/clio/README.md), [Leviathan](cmd/leviathan/README.md), [Aegis](cmd/aegis/README.md)를 참고합니다.
+서비스별 실행·구현 문서는 [Clio](cmd/clio/README.md), [Leviathan](cmd/leviathan/README.md), [Aegis](cmd/aegis/README.md)를 참고합니다. 지금까지의 작업 내역과 처음 코드를 읽는 분을 위한 안내(읽는 순서, 파일별 역할, 주요 개념)는 각 서비스의 `WORKLOG.md`([Clio](cmd/clio/WORKLOG.md), [Leviathan](cmd/leviathan/WORKLOG.md), [Aegis](cmd/aegis/WORKLOG.md))에 정리했습니다.
 
 Leviathan의 기관 목록은 패키지가 로드될 때 한 번 만들어지며, 표 사이의 값이 맞지 않으면(없는 상위 ID 참조, 주소 누락 등) 패닉을 일으켜 잘못된 데이터가 배포되지 않도록 합니다. `go test -v ./internal/leviathan -run PrintsTree`로 법원·공소청 트리를 출력해 데이터를 검토할 수 있습니다.
 

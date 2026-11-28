@@ -14,6 +14,7 @@ import { MOD_KEY } from "./keyboard.js";
 //   - active: 사건목록 탭이 보이는 중인지. 보일 때만 Esc로 닫힙니다.
 //   - onOpenTab: "탭으로 열기" 버튼. 패널을 닫고 같은 사건을 사건 탭(전체 화면)으로 엽니다.
 export default function CaseDrawer({ item, active, onClose, onOpenTab }) {
+  // 패널이 열려 있고 사건목록 탭이 보일 때만 Esc 키 이벤트를 등록합니다.
   useEffect(() => {
     if (!item || !active) return;
     const onKey = (e) => {
@@ -23,6 +24,7 @@ export default function CaseDrawer({ item, active, onClose, onOpenTab }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [item, active, onClose]);
 
+  // 컴포넌트가 null을 돌려주면 화면에 아무것도 그리지 않습니다(= 패널 닫힘).
   if (!item) return null;
   return (
     <aside

@@ -10,6 +10,8 @@ import CategoryBadge from "./CategoryBadge.jsx";
 // 사건 상세 정보 카드들입니다. 오른쪽 상세 패널(CaseDrawer)과 사건 탭(CaseDetailPage)이 함께 씁니다.
 
 // 이름-값 목록(dl). 왼쪽이 항목 이름, 오른쪽이 값입니다.
+// items는 [["사건번호", 값], ["사건명", 값], ...] 모양의 배열입니다.
+// className="contents"는 감싼 div가 레이아웃에 영향을 주지 않게 해서 dt/dd가 바로 격자 칸에 놓이게 합니다.
 function Fields({ items }) {
   return (
     <dl className="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-2 text-sm">
@@ -26,11 +28,13 @@ function Fields({ items }) {
 // 사건번호를 클립보드에 복사하는 버튼. 복사하면 잠깐 "복사됨"으로 바뀝니다.
 export function CopyNumberButton({ number }) {
   const [copied, setCopied] = useState(false);
+  // 다른 사건을 보게 되면(number가 바뀌면) "복사됨" 표시를 원래대로 돌립니다.
   useEffect(() => setCopied(false), [number]);
   return (
     <Button
       variant="ghost"
       size="xs"
+      // navigator.clipboard는 브라우저의 클립보드 기능입니다. 지원하지 않는 환경이면 ?.로 조용히 건너뜁니다.
       onClick={() => navigator.clipboard?.writeText(number).then(() => setCopied(true))}
     >
       {copied ? <Check /> : <Copy />}
@@ -39,6 +43,9 @@ export function CopyNumberButton({ number }) {
   );
 }
 
+// CaseInfoCard는 사건번호·구성(연도/부호/일련번호)·종류·사건명을 보여 주는 카드입니다.
+// size = "sm"은 기본값으로, 미리보기 패널은 작게(sm), 사건 탭은 크게(default) 씁니다.
+// <>...</>는 Fragment로, 여러 요소를 감싸는 태그 없이 묶을 때 씁니다.
 export function CaseInfoCard({ item, size = "sm" }) {
   return (
     <Card size={size}>
@@ -69,6 +76,7 @@ export function CaseInfoCard({ item, size = "sm" }) {
   );
 }
 
+// PartiesCard는 당사자 목록 표입니다. 의뢰인 행은 배경색과 굵은 글씨, "의뢰인" 배지로 강조합니다.
 export function PartiesCard({ item, size = "sm" }) {
   const clientCount = item.parties.filter((p) => p.client).length;
   return (
@@ -90,6 +98,7 @@ export function PartiesCard({ item, size = "sm" }) {
           </TableHeader>
           <TableBody>
             {item.parties.map((p, i) => (
+              // 당사자에는 고유 ID가 없고 순서가 바뀌지 않으므로 배열 위치(i)를 key로 씁니다.
               <TableRow key={i} className={cn(p.client && "bg-primary/5")}>
                 <TableCell className="pl-4">{p.role}</TableCell>
                 <TableCell className={cn(p.client && "font-semibold")}>{p.name}</TableCell>
@@ -109,6 +118,7 @@ export function PartiesCard({ item, size = "sm" }) {
   );
 }
 
+// CourtCard는 계속 법원·재판부·소재지·주소를 보여 줍니다. 주소가 없는 법원(예: 신설 법원)은 안내 문구를 보여 줍니다.
 export function CourtCard({ item, size = "sm" }) {
   return (
     <Card size={size}>

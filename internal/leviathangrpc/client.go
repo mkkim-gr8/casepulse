@@ -1,4 +1,14 @@
 // Package leviathangrpc는 다른 서비스가 Leviathan의 기관 정보를 조회할 때 쓰는 클라이언트를 제공합니다.
+//
+// Clio와 Aegis는 이 패키지를 통해서만 Leviathan에 요청합니다. 즉 Leviathan 내부 코드(internal/leviathan)를
+// 직접 import하지 않고, 네트워크(gRPC)로 "법원 목록 주세요"라고 물어봅니다.
+// 이렇게 하면 서비스끼리 서로의 내부 구현에 묶이지 않아 따로 고치고 배포할 수 있습니다.
+//
+// 사용 예:
+//
+//	conn, _ := grpc.NewClient("localhost:9090", grpc.WithTransportCredentials(insecure.NewCredentials()))
+//	client := leviathangrpc.NewClient(conn)
+//	courts, err := client.ListCourts(ctx)
 package leviathangrpc
 
 import (
@@ -9,6 +19,8 @@ import (
 )
 
 // Client는 자동 생성된 gRPC 클라이언트를 감싸 호출 코드를 간단하게 합니다.
+// 생성된 클라이언트(gen/go/leviathan/v1)는 매번 요청 메시지를 만들고 응답에서 필드를 꺼내야 하므로,
+// 여기서 그 과정을 함수 하나로 묶어 둡니다.
 type Client struct {
 	rpc leviathanv1.LeviathanServiceClient
 }
@@ -19,6 +31,7 @@ func NewClient(conn grpc.ClientConnInterface) *Client {
 }
 
 // ListCourts는 전체 법원과 재판부 목록을 가져옵니다.
+// opts에는 grpc.WaitForReady(true)처럼 호출 방식을 바꾸는 옵션을 넘길 수 있습니다(...은 0개 이상 가변 인자).
 func (c *Client) ListCourts(ctx context.Context, opts ...grpc.CallOption) ([]*leviathanv1.Court, error) {
 	response, err := c.rpc.ListCourts(ctx, &leviathanv1.ListCourtsRequest{}, opts...)
 	if err != nil {

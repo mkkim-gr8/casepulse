@@ -12,6 +12,8 @@ import { MOD_KEY } from "./keyboard.js";
 // 처음에 그리는 행 수이자, 목록 끝에 닿을 때마다 더 그리는 행 수입니다.
 const BATCH_SIZE = 50;
 
+// Role은 당사자 지위("원고", "피고")를 이름 앞에 작은 회색 글자로 보여 줍니다.
+// children은 <Role>원고</Role>처럼 태그 사이에 넣은 내용입니다.
 function Role({ children }) {
   return <span className="mr-1 text-xs text-muted-foreground">{children}</span>;
 }
@@ -31,6 +33,7 @@ function WithTooltip({ content, children }) {
 
 // 의뢰인 열: 첫 의뢰인의 지위와 이름, 여러 명이면 "외 N"과 전체 목록 툴팁.
 function ClientCell({ clients }) {
+  // 의뢰인 모두가 같은 지위(예: 원고1·원고3)면 번호를 뗀 "원고"로, 아니면 첫 의뢰인의 지위를 그대로 보여 줍니다.
   const sameRole = clients.every((p) => roleGroup(p.role) === roleGroup(clients[0].role));
   const role = sameRole ? roleGroup(clients[0].role) : clients[0].role;
   return (
@@ -44,7 +47,7 @@ function ClientCell({ clients }) {
 // 다른 당사자 열: 의뢰인이 아닌 당사자를 지위별로 묶어 첫 묶음을 보여 주고, 나머지 묶음은 +N으로 표시합니다.
 function OthersCell({ others }) {
   if (others.length === 0) return <span className="text-muted-foreground">—</span>;
-  const [first, ...rest] = others;
+  const [first, ...rest] = others; // 배열 구조 분해: 첫 항목은 first, 나머지는 rest 배열
   return (
     <span className="inline-flex items-center gap-1.5">
       <WithTooltip content={first.names.length > 1 && first.names.join(", ")}>
@@ -62,6 +65,8 @@ function OthersCell({ others }) {
   );
 }
 
+// SortHead는 눌러서 정렬할 수 있는 표 머리글입니다. 현재 정렬 중인 열은 ↑/↓, 아니면 ↕ 아이콘을 보여 줍니다.
+// aria-sort는 화면 낭독기 사용자에게 정렬 상태를 알려 주는 접근성 속성입니다.
 function SortHead({ id, label, sort, onSort, className }) {
   const active = sort.key === id;
   const Icon = active ? (sort.dir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
@@ -89,9 +94,9 @@ function SortHead({ id, label, sort, onSort, className }) {
 //   - onSelect(사건): 한 번 클릭. 오른쪽 상세 패널로 빠르게 봅니다.
 //   - onOpen(사건): 더블클릭 또는 Ctrl/Cmd+클릭. 사건 탭(전체 화면)으로 엽니다.
 export default function CaseTable({ rows, sort, onSort, selectedId, onSelect, onOpen }) {
-  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
-  const scrollRef = useRef(null);
-  const sentinelRef = useRef(null);
+  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE); // 지금 그리고 있는 행 수
+  const scrollRef = useRef(null); // 스크롤되는 상자
+  const sentinelRef = useRef(null); // 표 맨 아래의 "보초" 요소(스피너)
   const hasMore = visibleCount < rows.length;
 
   // 검색·필터·정렬이 바뀌어 목록이 달라지면 맨 위부터 다시 보여 줍니다.
@@ -105,6 +110,8 @@ export default function CaseTable({ rows, sort, onSort, selectedId, onSelect, on
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel || !hasMore) return;
+    // IntersectionObserver는 어떤 요소가 화면(여기서는 스크롤 상자)에 보이기 시작하는지 알려 주는 브라우저 기능입니다.
+    // 스크롤 이벤트를 직접 계산하는 것보다 간단하고 가볍습니다.
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) setVisibleCount((n) => n + BATCH_SIZE);
@@ -139,6 +146,7 @@ export default function CaseTable({ rows, sort, onSort, selectedId, onSelect, on
                 <TableRow
                   key={c.id}
                   title={`클릭: 미리보기 · 더블클릭 또는 ${MOD_KEY}+클릭: 탭으로 열기`}
+                  // metaKey는 맥의 ⌘ 키입니다. Ctrl/⌘와 함께 누르면 탭으로 열고, 그냥 누르면 미리보기를 엽니다.
                   onClick={(e) => (e.ctrlKey || e.metaKey ? onOpen(c) : onSelect(c))}
                   onDoubleClick={() => {
                     window.getSelection()?.removeAllRanges(); // 더블클릭으로 잡힌 글자 선택을 지웁니다.

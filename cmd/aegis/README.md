@@ -2,6 +2,8 @@
 
 Aegis는 React 화면과 Gin 기반 HTTP API를 제공하는 진입 서비스입니다. 사건 데이터를 직접 저장하거나 검증하지 않고, 사건 작업은 Clio에, 법원 선택 목록은 Leviathan에 gRPC로 요청합니다.
 
+지금까지의 작업 내역과 코드 읽는 순서는 [WORKLOG.md](WORKLOG.md)에 정리했습니다.
+
 ## 책임과 요청 흐름
 
 - 브라우저는 Aegis의 HTTP API를 호출합니다.
