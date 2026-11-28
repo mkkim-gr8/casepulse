@@ -1,8 +1,9 @@
 // 단축키 처리에 쓰는 도우미입니다.
 
 // 사용자가 글자를 입력하는 중인지 알려 줍니다. 입력 중에는 단축키를 무시해야 합니다.
+// 예: 검색창에 "n"을 입력할 때 신건등록 단축키(N)가 실행되면 안 됩니다.
 export function isTyping() {
-  const el = document.activeElement;
+  const el = document.activeElement; // 지금 키보드 입력을 받고 있는(포커스된) 요소
   if (!el) return false;
   return el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
 }

@@ -2,6 +2,9 @@ package clio
 
 // 이 파일은 소송사건 한 건의 기본 정보(사건번호, 사건명, 당사자, 계속 법원·재판부)를 담는 자료형과
 // 그 값을 검사하는 함수를 담습니다. 진행내역·송달·문서 등은 이 서비스의 범위가 아니므로 넣지 않습니다.
+//
+// 이 파일은 DB나 네트워크를 전혀 모르는 "순수한" 도메인 코드입니다. 그래서 테스트하기 쉽고,
+// 저장 방식(메모리·PostgreSQL)이나 통신 방식(gRPC)이 바뀌어도 그대로 쓸 수 있습니다.
 
 import (
 	"errors"
@@ -28,6 +31,7 @@ const (
 )
 
 // valid는 c가 위에 정의한 사건 종류 중 하나인지 확인합니다.
+// (c CaseCategory)처럼 함수 이름 앞에 받는 값을 적으면 "메서드"가 되어 c.valid()로 호출할 수 있습니다.
 func (c CaseCategory) valid() bool {
 	switch c {
 	case CaseCategoryCivil, CaseCategoryAdministrative, CaseCategoryFamily,
@@ -52,10 +56,14 @@ type CaseNumber struct {
 
 // String은 사건번호를 "2026가합12345" 형식으로 돌려줍니다.
 func (n CaseNumber) String() string {
+	// %04d: 4자리 숫자(모자라면 앞을 0으로 채움), %s: 문자열, %d: 숫자
 	return fmt.Sprintf("%04d%s%d", n.Year, n.Code, n.Serial)
 }
 
 // Validate는 연도·사건부호·일련번호가 형식에 맞는지 검사합니다.
+//
+// 문제를 하나 찾았다고 바로 멈추지 않고 errs에 모두 모은 뒤 errors.Join으로 하나의 오류로 합칩니다.
+// 그래야 사용자가 화면에서 고칠 곳을 한 번에 볼 수 있습니다. 문제가 없으면 errors.Join은 nil을 돌려줍니다.
 func (n CaseNumber) Validate() error {
 	var errs []error
 	if n.Year < 1000 || n.Year > 9999 {
@@ -64,6 +72,7 @@ func (n CaseNumber) Validate() error {
 	if n.Code == "" {
 		errs = append(errs, errors.New("사건부호가 비어 있습니다"))
 	}
+	// 문자열을 range로 돌면 바이트가 아니라 글자(rune) 단위로 하나씩 꺼냅니다. 한글 한 글자는 3바이트입니다.
 	for _, r := range n.Code {
 		if !unicode.Is(unicode.Hangul, r) {
 			errs = append(errs, fmt.Errorf("사건부호 %q에는 한글만 쓸 수 있습니다", n.Code))
@@ -79,10 +88,14 @@ func (n CaseNumber) Validate() error {
 // ParseCaseNumber는 "2026가합12345" 형식의 문자열을 CaseNumber로 바꿉니다.
 // 앞뒤 공백과 사이 공백("2026 가합 12345")은 무시합니다.
 func ParseCaseNumber(s string) (CaseNumber, error) {
+	// strings.Fields는 공백을 기준으로 잘라 조각 목록을 만들고, Join으로 다시 붙이면 공백이 모두 사라집니다.
 	compact := strings.Join(strings.Fields(s), "")
+	// 한글이 섞인 문자열을 글자 위치로 자르기 위해 rune(글자) 배열로 바꿉니다.
 	runes := []rune(compact)
 
 	// 앞쪽 숫자 = 연도, 가운데 숫자 아닌 부분 = 사건부호, 뒤쪽 숫자 = 일련번호.
+	// i는 앞에서부터 숫자가 끝나는 위치, j는 뒤에서부터 숫자가 시작하는 위치입니다.
+	// 예: "2026가합12345" → i=4, j=6 → runes[:4]="2026", runes[4:6]="가합", runes[6:]="12345"
 	i := 0
 	for i < len(runes) && unicode.IsDigit(runes[i]) {
 		i++
@@ -91,12 +104,14 @@ func ParseCaseNumber(s string) (CaseNumber, error) {
 	for j > i && unicode.IsDigit(runes[j-1]) {
 		j--
 	}
+	// 연도가 4자리가 아니거나(i != 4), 사건부호가 없거나(j == i), 일련번호가 없으면(j == len) 형식 오류입니다.
 	if i != 4 || j == i || j == len(runes) {
 		return CaseNumber{}, fmt.Errorf("사건번호 %q는 연도(4자리)+사건부호+일련번호 형식이 아닙니다", s)
 	}
 
 	year, err := strconv.Atoi(string(runes[:i]))
 	if err != nil {
+		// %w는 원래 오류를 감싸서 보관합니다. 나중에 errors.Is/As로 원래 오류를 꺼낼 수 있습니다.
 		return CaseNumber{}, fmt.Errorf("사건번호 %q의 연도를 읽을 수 없습니다: %w", s, err)
 	}
 	serial, err := strconv.Atoi(string(runes[j:]))
@@ -138,8 +153,8 @@ type Party struct {
 //
 // 의뢰인들이 모두 같은 쪽인지 검사할 때 씁니다(Case.Validate).
 func PartySide(role string) string {
-	var b strings.Builder
-	depth := 0
+	var b strings.Builder // 글자를 하나씩 이어 붙여 문자열을 만드는 도구
+	depth := 0            // 지금 괄호 안에 몇 겹 들어와 있는지 셉니다. 0이면 괄호 밖입니다.
 	for _, r := range role {
 		switch {
 		case r == '(' || r == '（':
@@ -149,9 +164,10 @@ func PartySide(role string) string {
 				depth--
 			}
 		case depth == 0 && !unicode.IsSpace(r):
-			b.WriteRune(r)
+			b.WriteRune(r) // 괄호 밖의 공백이 아닌 글자만 남깁니다.
 		}
 	}
+	// 끝에 붙은 번호("원고1"의 "1")를 지웁니다.
 	return strings.TrimRight(b.String(), "0123456789")
 }
 
@@ -194,7 +210,7 @@ func (c Case) Clients() []Party {
 // clientSides는 의뢰인들의 지위(PartySide)를 처음 나온 순서대로 중복 없이 돌려줍니다.
 func clientSides(clients []Party) []string {
 	var sides []string
-	seen := make(map[string]bool)
+	seen := make(map[string]bool) // 이미 넣은 지위를 기억해 중복을 막습니다.
 	for _, p := range clients {
 		side := PartySide(p.Role)
 		if side != "" && !seen[side] {
@@ -238,6 +254,8 @@ func (c Case) ValidateFields() error {
 		errs = append(errs, fmt.Errorf("알 수 없는 사건 종류 %q입니다", c.Category))
 	}
 
+	// if ... else if 사슬에서 `clients := c.Clients(); len(clients) == 0`처럼 세미콜론 앞에 변수를 만들면,
+	// 그 변수는 이 if 사슬 안에서만 쓸 수 있습니다.
 	if len(c.Parties) == 0 {
 		errs = append(errs, errors.New("당사자가 한 명 이상 있어야 합니다"))
 	} else if clients := c.Clients(); len(clients) == 0 {

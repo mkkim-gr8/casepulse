@@ -1,4 +1,7 @@
 // Package cliogrpc는 웹 서버가 Clio gRPC 서비스를 호출할 때 쓰는 클라이언트를 제공합니다.
+//
+// Aegis(웹 서버)는 사건을 직접 저장하지 않고, 이 클라이언트로 Clio에 "사건 목록 주세요",
+// "이 사건 등록해 주세요"라고 요청합니다. 실제 검증과 저장은 Clio가 합니다.
 package cliogrpc
 
 import (
@@ -24,6 +27,7 @@ func (c *Client) ListCases(ctx context.Context, opts ...grpc.CallOption) ([]*cli
 	if err != nil {
 		return nil, 0, err
 	}
+	// Protobuf의 int32를 Go의 일반 정수형 int로 바꿔 돌려줍니다.
 	return response.Cases, int(response.Total), nil
 }
 

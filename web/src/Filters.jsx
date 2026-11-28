@@ -15,17 +15,21 @@ const ALL = "all";
 
 // 왼쪽 필터 패널: 사건 종류, 접수 연도, 계속 법원. onCollapse는 패널을 접는 버튼에 연결됩니다.
 export default function Filters({ cases, filters, onChange, years, courts, onCollapse }) {
+  // 사건 종류별 사건 수입니다(예: { civil: 96, criminal: 48 }). 체크박스 옆에 숫자로 보여 줍니다.
   const counts = useMemo(() => {
     const m = {};
     for (const c of cases) m[c.category] = (m[c.category] ?? 0) + 1;
     return m;
   }, [cases]);
 
+  // 사건 종류 체크박스를 누르면 선택 목록에 넣거나 뺍니다.
+  // 기존 Set을 직접 고치지 않고 복사본(next)을 만들어 고친 뒤 넘겨야 React가 바뀐 것을 알아챕니다.
   const toggleCategory = (value) => {
     const next = new Set(filters.categories);
     next.has(value) ? next.delete(value) : next.add(value);
     onChange({ ...filters, categories: next });
   };
+  // 적용 중인 필터가 하나라도 있으면 "초기화" 버튼을 켭니다.
   const active = filters.categories.size > 0 || filters.year || filters.courtId;
 
   return (

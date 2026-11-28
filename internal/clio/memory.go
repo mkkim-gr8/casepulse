@@ -24,6 +24,7 @@ func NewMemoryRepository() *MemoryRepository {
 
 // List는 최신 사건부터 복사해 돌려줍니다.
 func (m *MemoryRepository) List(context.Context) ([]StoredCase, error) {
+	// RLock은 "읽기 잠금"입니다. 여러 요청이 동시에 읽는 것은 허용하고, 쓰는 동안에는 기다리게 합니다.
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	items := make([]StoredCase, len(m.list))
@@ -47,11 +48,14 @@ func (m *MemoryRepository) Get(_ context.Context, id string) (StoredCase, error)
 // Insert는 사건들을 한 번에 저장합니다. 중복이 하나라도 있으면 아무것도 저장하지 않습니다.
 // 한 번에 넣은 사건들은 사건번호가 큰 순서로 목록 맨 앞에 놓입니다.
 func (m *MemoryRepository) Insert(ctx context.Context, cases ...Case) ([]StoredCase, error) {
+	// Lock은 "쓰기 잠금"입니다. 저장하는 동안에는 다른 읽기·쓰기가 모두 기다립니다.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// 1단계: 먼저 전부 검사만 합니다. 중간에 실패해도 아무것도 저장되지 않도록(DB 트랜잭션과 같은 효과)
+	// 저장은 검사가 모두 끝난 뒤에 합니다. seen은 이번에 함께 넣는 사건끼리의 중복을 잡습니다.
 	seen := make(map[string]bool, len(cases))
 	for _, c := range cases {
 		key := caseKey(c)
@@ -61,6 +65,7 @@ func (m *MemoryRepository) Insert(ctx context.Context, cases ...Case) ([]StoredC
 		seen[key] = true
 	}
 
+	// 2단계: 실제로 저장합니다. ID는 "case-0001"처럼 순서대로 붙입니다(PostgreSQL은 UUID를 씁니다).
 	stored := make([]StoredCase, len(cases))
 	for i, c := range cases {
 		m.nextID++
@@ -68,6 +73,7 @@ func (m *MemoryRepository) Insert(ctx context.Context, cases ...Case) ([]StoredC
 		m.byID[stored[i].ID] = stored[i]
 		m.keys[caseKey(c)] = true
 	}
+	// 3단계: 이번에 넣은 사건들을 사건번호가 큰 순서로 정렬해 목록 맨 앞에 붙입니다(최신 사건이 위로).
 	batch := append([]StoredCase(nil), stored...)
 	sort.SliceStable(batch, func(i, j int) bool { return numberAfter(batch[i].Case.Number, batch[j].Case.Number) })
 	m.list = append(batch, m.list...)

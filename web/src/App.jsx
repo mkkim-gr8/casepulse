@@ -25,6 +25,15 @@ import CaseDetailPage from "./CaseDetailPage.jsx";
 import { fetchCases, fetchCourts } from "./api.js";
 import { isPlainKey, isTyping } from "./keyboard.js";
 
+// React 기초 용어(이 파일에서 자주 나옵니다):
+//   - useState(초기값): 컴포넌트가 기억하는 값(상태)과 그 값을 바꾸는 함수를 [값, set함수]로 돌려줍니다.
+//     set함수로 값을 바꾸면 React가 화면을 다시 그립니다. 변수에 직접 대입하면 화면이 바뀌지 않습니다.
+//   - useEffect(함수, [의존값]): 화면을 그린 뒤 실행할 작업(서버 요청, 이벤트 등록 등)입니다.
+//     의존값이 바뀔 때만 다시 실행되고, 돌려준 함수는 정리(clean-up) 때 실행됩니다.
+//   - useCallback(함수, [의존값]): 의존값이 그대로면 같은 함수 객체를 재사용합니다(불필요한 재실행 방지).
+//   - useRef(초기값): 값을 바꿔도 화면을 다시 그리지 않는 보관함입니다. .current로 읽고 씁니다.
+
+// 항상 열려 있는 첫 탭(사건목록)의 id입니다.
 const LIST_TAB = "cases";
 
 // 탭 막대의 탭 하나. 브라우저·윈도우 탭처럼 위쪽 모서리가 둥근 상자로 그립니다.
@@ -86,7 +95,8 @@ function AppTab({ id, active, icon: Icon, label, dirty, onSelect, onClose }) {
 //   - 사건 탭은 사건 하나를 전체 화면으로 봅니다. 같은 사건은 탭 하나만 열고, 다시 열면 그 탭으로 옮깁니다.
 // 다른 탭으로 옮겨도 탭 내용은 숨기기만 하므로(hidden) 입력 중인 내용과 스크롤 위치가 유지됩니다.
 export default function App() {
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme } = useTheme(); // 실제로 적용 중인 테마("light" 또는 "dark")
+  // 서버에서 받은 사건·법원 목록. null은 "아직 불러오는 중"을 뜻합니다.
   const [cases, setCases] = useState(null);
   const [casesError, setCasesError] = useState(null);
   const [courts, setCourts] = useState(null);
@@ -99,17 +109,21 @@ export default function App() {
   const [tabStatus, setTabStatus] = useState({}); // id → { dirty, label }
   const [activeTab, setActiveTab] = useState(LIST_TAB);
   const [pendingClose, setPendingClose] = useState(null); // 닫기 확인 중인 탭 id
-  const [openCase, setOpenCase] = useState(null);
-  const seqRef = useRef(0);
+  const [openCase, setOpenCase] = useState(null); // 사건목록에서 미리보기로 열어 줄 사건(등록 직후 등)
+  const seqRef = useRef(0); // 신건등록 탭 번호를 1, 2, 3...으로 매기는 계수기
 
+  // 처음 화면이 그려질 때 한 번만([] = 의존값 없음) 사건과 법원 목록을 서버에서 받아 옵니다.
+  // .then(성공 시 함수, 실패 시 함수) 형태로, 성공하면 목록을, 실패하면 오류 메시지를 상태에 넣습니다.
   useEffect(() => {
     fetchCases().then(setCases, (e) => setCasesError(e.message));
     fetchCourts().then(setCourts, (e) => setCourtsError(e.message));
   }, []);
 
+  // 신건등록 탭을 하나 더 열고 그 탭으로 옮깁니다.
   const openNewCaseTab = useCallback(() => {
     const seq = ++seqRef.current;
     const id = `new-${seq}`;
+    // set함수에 함수를 넘기면 "직전 값"을 받아 새 값을 만듭니다. [...list, 새것]은 기존 배열 뒤에 하나를 더한 새 배열입니다.
     setTabs((list) => [...list, { id, kind: "new", seq }]);
     setActiveTab(id);
   }, []);
@@ -132,11 +146,15 @@ export default function App() {
     setTabs(rest);
     // 보고 있던 탭을 닫으면 바로 왼쪽 탭(없으면 사건목록)으로 옮깁니다.
     if (activeTab === id) setActiveTab(rest[idx - 1]?.id ?? LIST_TAB);
+    // 객체에서 [id] 키만 빼고 나머지(...others)로 새 객체를 만듭니다. 닫은 탭의 상태 정보를 지우는 것입니다.
     setTabStatus(({ [id]: _, ...others }) => others);
   };
 
+  // 등록 탭(CaseForm)이 "저장 안 됨 여부와 탭 이름"이 바뀔 때마다 알려 주는 함수입니다.
   const onStatus = useCallback((id, status) => setTabStatus((s) => ({ ...s, [id]: status })), []);
 
+  // 사건 등록에 성공했을 때: 목록 맨 앞에 새 사건을 넣고, 등록 탭을 닫고,
+  // 사건목록으로 돌아가 새 사건의 미리보기를 열고, 위쪽에 성공 알림을 띄웁니다.
   const onCreated = (id, created) => {
     setCases((list) => [created, ...(list ?? [])]);
     closeTab(id, true);
@@ -154,6 +172,7 @@ export default function App() {
       }
     };
     window.addEventListener("keydown", onKey);
+    // 정리 함수: 다음 실행 전이나 화면에서 사라질 때 등록한 이벤트를 떼어 내 중복 등록을 막습니다.
     return () => window.removeEventListener("keydown", onKey);
   }, [openNewCaseTab, pendingClose]);
 
@@ -161,9 +180,10 @@ export default function App() {
   const anyDirty = Object.values(tabStatus).some((s) => s.dirty);
   useEffect(() => {
     if (!anyDirty) return;
+    // beforeunload 이벤트에서 preventDefault를 부르면 브라우저가 "사이트를 나가시겠습니까?" 창을 띄웁니다.
     const onBeforeUnload = (e) => {
       e.preventDefault();
-      e.returnValue = "";
+      e.returnValue = ""; // 옛 브라우저 호환용
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
@@ -172,6 +192,8 @@ export default function App() {
   const pendingLabel = pendingClose ? (tabStatus[pendingClose]?.label ?? "신건등록") : "";
   const labelOf = (seq) => (seq === 1 ? "신건등록" : `신건등록 (${seq})`);
 
+  // 아래는 JSX입니다. HTML처럼 보이지만 JavaScript 안에서 화면 구조를 적는 문법이며,
+  // {중괄호} 안에는 JavaScript 값을 넣을 수 있습니다. className은 HTML의 class(여기서는 Tailwind 클래스)입니다.
   return (
     <div className="flex h-svh flex-col bg-surface">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-background px-4">
@@ -213,6 +235,7 @@ export default function App() {
           active={activeTab === LIST_TAB}
           onSelect={() => setActiveTab(LIST_TAB)}
         />
+        {/* 배열.map으로 탭마다 AppTab을 하나씩 만듭니다. key는 React가 항목을 구분하는 고유값입니다. */}
         {tabs.map((tab) => {
           const { id } = tab;
           const status =
@@ -278,6 +301,7 @@ export default function App() {
         ))}
       </main>
 
+      {/* 저장하지 않은 탭을 닫으려 할 때 뜨는 확인 대화상자입니다. !!값은 값을 true/false로 바꿉니다. */}
       <AlertDialog open={!!pendingClose} onOpenChange={(open) => !open && setPendingClose(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

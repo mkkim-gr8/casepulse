@@ -8,8 +8,10 @@ export const CATEGORIES = [
   { value: "administrative", label: "행정", badge: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" },
   { value: "criminal", label: "형사", badge: "bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300" },
 ];
+// 종류 코드로 바로 찾을 수 있게 { civil: {...}, family: {...} } 모양의 객체로 바꿔 둡니다.
 export const CATEGORY_BY_VALUE = Object.fromEntries(CATEGORIES.map((c) => [c.value, c]));
 
+// 필터의 초기값입니다. categories는 Set(중복 없는 값 모음)이라 선택한 종류를 넣고 빼기 쉽습니다.
 export const EMPTY_FILTERS = { query: "", categories: new Set(), year: "", courtId: "" };
 
 // 필터 패널에서 적용 중인 조건 수입니다(검색어 제외). 접힌 필터 아이콘에 숫자로 보여 줍니다.
@@ -18,6 +20,8 @@ export function activeFilterCount(filters) {
 }
 
 // 정렬할 수 있는 열과 정렬 기준값.
+// 각 함수는 사건 하나를 받아 비교할 값의 배열을 돌려줍니다. 앞의 값이 같으면 다음 값으로 비교합니다
+// (예: 사건번호는 연도 → 사건부호 → 일련번호 순).
 export const SORTERS = {
   number: (c) => [c.year, c.code, c.serial],
   category: (c) => [CATEGORIES.findIndex((x) => x.value === c.category)],
@@ -26,6 +30,9 @@ export const SORTERS = {
   court: (c) => [c.court.name, c.court.panel],
 };
 
+// compareKeys는 두 기준값 배열을 앞에서부터 비교합니다.
+// a가 앞이면 음수, 뒤면 양수, 같으면 0을 돌려줍니다(Array.sort가 요구하는 규칙).
+// 문자열은 localeCompare(..., "ko")로 한국어 가나다순 비교를 합니다.
 function compareKeys(a, b) {
   for (let i = 0; i < a.length; i++) {
     if (a[i] === b[i]) continue;
@@ -36,13 +43,17 @@ function compareKeys(a, b) {
 }
 
 // 필터와 정렬을 적용한 새 배열을 돌려줍니다.
+// 원본 배열(cases)은 바꾸지 않습니다. React에서는 상태 값을 직접 고치지 않는 것이 규칙입니다.
 export function filterAndSort(cases, filters, sort) {
+  // 검색어에서 모든 공백을 지우고 소문자로 바꿉니다. "2026 가합"으로 검색해도 "2026가합"과 맞도록 하기 위해서입니다.
   const q = filters.query.trim().replace(/\s+/g, "").toLowerCase();
   const rows = cases.filter((c) => {
     if (filters.categories.size && !filters.categories.has(c.category)) return false;
     if (filters.year && String(c.year) !== filters.year) return false;
     if (filters.courtId && c.court.id !== filters.courtId) return false;
     if (!q) return true;
+    // 검색 대상(사건번호·사건명·법원·재판부·당사자)을 "|"로 이어 붙인 하나의 문자열(건초더미, haystack)에서
+    // 검색어(바늘)를 찾습니다. 여기서도 공백을 지워 검색어와 같은 조건으로 비교합니다.
     const hay = [c.number, c.title, c.court.name, c.court.panel, ...c.parties.flatMap((p) => [p.role, p.name])]
       .join("|")
       .replace(/\s+/g, "")
@@ -50,11 +61,13 @@ export function filterAndSort(cases, filters, sort) {
     return hay.includes(q);
   });
   const key = SORTERS[sort.key];
-  const dir = sort.dir === "asc" ? 1 : -1;
+  const dir = sort.dir === "asc" ? 1 : -1; // 내림차순이면 비교 결과의 부호를 뒤집습니다.
+  // filter가 이미 새 배열을 만들었으므로 여기서 sort로 제자리 정렬해도 원본은 바뀌지 않습니다.
   return rows.sort((a, b) => dir * compareKeys(key(a), key(b)));
 }
 
 // "피고2"처럼 지위 끝의 번호를 뗀 값입니다. 같은 쪽 당사자를 묶을 때 씁니다.
+// /\d+$/는 "문자열 끝에 붙은 숫자 하나 이상"을 뜻하는 정규식입니다.
 export function roleGroup(role) {
   return role.replace(/\d+$/, "");
 }
@@ -67,11 +80,14 @@ export function partySide(role) {
 
 // 의뢰인들의 지위(partySide)를 처음 나온 순서대로 중복 없이 돌려줍니다.
 // 두 개 이상이면 지위가 다른 당사자를 함께 대리하는 것이므로 이해충돌입니다.
+// new Set(...)으로 중복을 없애고, [...set]으로 다시 배열로 바꿉니다. filter(Boolean)은 빈 문자열을 뺍니다.
 export function clientSides(parties) {
   return [...new Set(parties.filter((p) => p.client).map((p) => partySide(p.role)).filter(Boolean))];
 }
 
 // 당사자를 지위별로 묶어 입력 순서대로 [{role, names}]로 돌려줍니다.
+// 바로 앞 묶음과 지위가 같으면 그 묶음에 이름을 더하고, 다르면 새 묶음을 만듭니다.
+// 예: [원고1 김, 원고2 이, 피고 박] → [{role: "원고", names: [김, 이]}, {role: "피고", names: [박]}]
 export function groupParties(parties) {
   const groups = [];
   for (const p of parties) {
@@ -83,6 +99,7 @@ export function groupParties(parties) {
   return groups;
 }
 
+// 이름이 여럿이면 "김민준 외 2"처럼 줄여서 보여 줍니다.
 export function namesSummary(names) {
   return names.length > 1 ? `${names[0]} 외 ${names.length - 1}` : names[0];
 }

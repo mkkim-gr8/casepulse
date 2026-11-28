@@ -1,5 +1,13 @@
 package clio
 
+// 이 파일은 Clio의 "서비스 계층"입니다. 구조는 다음과 같습니다.
+//
+//	gRPC 서버(internal/cliogrpc/server) ──▶ Store(이 파일: 검증 + 법원 정보 붙이기) ──▶ Repository(저장)
+//	                                                                                ├─ MemoryRepository(memory.go)
+//	                                                                                └─ postgres.Repository(postgres/)
+//
+// Store는 Repository가 메모리인지 DB인지 모른 채 인터페이스로만 사용합니다.
+
 import (
 	"context"
 	"errors"
@@ -7,6 +15,8 @@ import (
 	"strings"
 )
 
+// 미리 만들어 둔 오류 값(sentinel error)입니다. 호출한 쪽은 errors.Is(err, ErrCaseNotFound)처럼
+// 비교해서 어떤 종류의 실패인지 판단하고, gRPC 상태 코드(NotFound 등)로 바꿉니다.
 var (
 	// ErrDuplicateCase는 같은 법원에 같은 사건번호가 이미 저장되어 있을 때 반환합니다.
 	ErrDuplicateCase = errors.New("같은 법원에 같은 사건번호가 이미 등록되어 있습니다")
@@ -20,7 +30,10 @@ type ValidationError struct {
 	Err error
 }
 
+// Error 메서드가 있으면 Go의 error 인터페이스를 만족하므로 일반 오류처럼 돌려줄 수 있습니다.
 func (e *ValidationError) Error() string { return e.Err.Error() }
+
+// Unwrap은 감싼 원래 오류를 돌려줍니다. errors.Is/As가 안쪽 오류까지 살펴볼 수 있게 합니다.
 func (e *ValidationError) Unwrap() error { return e.Err }
 
 // StoredCase는 저장소가 ID를 붙여 보관한 사건입니다.
@@ -30,6 +43,10 @@ type StoredCase struct {
 }
 
 // Repository는 사건을 실제로 보관하는 곳(메모리, PostgreSQL)이 갖춰야 할 기능입니다.
+//
+// interface는 "이런 메서드들을 가진 타입이면 무엇이든 된다"는 약속입니다. MemoryRepository와
+// postgres.Repository는 모두 아래 네 메서드를 가지고 있으므로 Repository로 쓸 수 있습니다.
+// 모든 메서드가 ctx(context.Context)를 받는 것은 요청이 취소되거나 시간이 초과되면 DB 작업도 멈추기 위해서입니다.
 // 입력 검증과 법원 확인은 Store가 맡고, Repository는 저장과 조회만 합니다.
 type Repository interface {
 	// List는 최근 등록한 사건부터, 같은 때 등록한 사건은 사건번호가 큰 순서로 돌려줍니다.
@@ -53,8 +70,8 @@ type Record struct {
 // Store는 사건을 검증해 Repository에 저장하고, 조회 결과에 법원 정보를 붙이는 Clio의 서비스 계층입니다.
 // 법원 목록은 시작할 때 Leviathan에서 받은 스냅샷이며 바뀌지 않으므로 잠금 없이 읽습니다.
 type Store struct {
-	repo   Repository
-	courts map[string]Court
+	repo   Repository       // 실제 저장소(메모리 또는 PostgreSQL)
+	courts map[string]Court // 법원 ID → 법원 정보. ID로 바로 찾기 위해 map을 씁니다.
 }
 
 // NewStore는 저장소와 법원 목록으로 서비스 계층을 만듭니다.
@@ -76,6 +93,7 @@ func (s *Store) SeedIfEmpty(ctx context.Context, cases []Case) (int, error) {
 	if count > 0 || len(cases) == 0 {
 		return 0, nil
 	}
+	// 더미 사건도 사용자가 등록한 사건과 똑같이 검사해서, 잘못된 더미 자료가 DB에 들어가지 않게 합니다.
 	for _, c := range cases {
 		if _, err := s.validate(c); err != nil {
 			return 0, fmt.Errorf("초기 사건 %s: %w", c.Number, err)
@@ -113,17 +131,21 @@ func (s *Store) Get(ctx context.Context, id string) (Record, error) {
 // Create는 새 사건을 검사한 뒤 저장합니다.
 // 사건의 법원과 재판부가 Clio 시작 때 받은 Leviathan 목록에 있는지도 확인합니다.
 func (s *Store) Create(ctx context.Context, c Case) (Record, error) {
+	// 클라이언트가 이미 요청을 취소했다면 더 진행하지 않습니다.
 	if err := ctx.Err(); err != nil {
 		return Record{}, err
 	}
-	c = normalize(c)
+	c = normalize(c) // 1) 앞뒤 공백 정리
+	// 2) 검사: 필드 형식, 법원 존재, 재판부 소속
 	if _, err := s.validate(c); err != nil {
 		return Record{}, err
 	}
+	// 3) 저장: 중복 사건번호면 ErrDuplicateCase가 돌아옵니다.
 	stored, err := s.repo.Insert(ctx, c)
 	if err != nil {
 		return Record{}, err
 	}
+	// 4) 저장 결과(ID 포함)에 법원 정보를 붙여 돌려줍니다.
 	return s.record(stored[0]), nil
 }
 
@@ -145,6 +167,7 @@ func (s *Store) checkCase(c Case) (Court, error) {
 	if c.Court.CourtID == "" {
 		return Court{}, errors.New("계속 법원이 비어 있습니다")
 	}
+	// map에서 값을 꺼낼 때 두 번째 값 ok는 "그 키가 있었는지"를 알려 줍니다.
 	court, ok := s.courts[c.Court.CourtID]
 	if !ok {
 		return Court{}, fmt.Errorf("법원 ID %q는 법원 목록에 없습니다", c.Court.CourtID)
@@ -189,6 +212,8 @@ func caseKey(c Case) string {
 }
 
 // cloneCase는 내부 슬라이스인 당사자 목록을 복사합니다.
+// 구조체를 대입하면 값이 복사되지만, 슬라이스는 같은 배열을 가리키는 "참조"만 복사됩니다.
+// 그래서 복사본에서 Parties를 고치면 원본까지 바뀌는 문제를 막으려고 슬라이스를 새로 만듭니다.
 func cloneCase(c Case) Case {
 	c.Parties = append([]Party(nil), c.Parties...)
 	return c

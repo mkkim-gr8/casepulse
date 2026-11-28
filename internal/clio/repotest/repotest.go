@@ -1,5 +1,9 @@
 // Package repotest는 clio.Repository 구현(메모리, PostgreSQL)이 같은 방식으로 동작하는지 확인하는
 // 공통 테스트를 제공합니다.
+//
+// 같은 테스트를 두 저장소에 똑같이 돌리면, 메모리 저장소로 개발·테스트해도
+// PostgreSQL에서 다르게 동작하는 일을 막을 수 있습니다.
+// 메모리 저장소는 internal/clio/store_test.go, PostgreSQL은 internal/clio/postgres/postgres_test.go에서 이 Run을 호출합니다.
 package repotest
 
 import (
@@ -12,6 +16,7 @@ import (
 )
 
 // Run은 newRepo가 돌려주는 빈 저장소마다 공통 테스트를 실행합니다.
+// t.Run은 하위 테스트를 만들어 이름별로 결과를 따로 보여 줍니다(go test -run 'Repo/Duplicate' 처럼 골라 실행 가능).
 func Run(t *testing.T, newRepo func(t *testing.T) clio.Repository) {
 	t.Run("InsertGetList", func(t *testing.T) { testInsertGetList(t, newRepo(t)) })
 	t.Run("Duplicate", func(t *testing.T) { testDuplicate(t, newRepo(t)) })

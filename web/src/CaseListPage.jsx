@@ -54,16 +54,19 @@ function DockButton({ label, shortcut, pressed, highlight, badge, onClick, child
 //   - openCase: 값이 바뀌면 그 사건의 상세 패널을 엽니다(방금 등록한 사건 보여 주기).
 //   - onOpenCaseTab: 사건을 사건 탭(전체 화면)으로 엽니다.
 export default function CaseListPage({ cases, error, active, onNewCase, openCase, onOpenCaseTab }) {
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [sort, setSort] = useState({ key: "number", dir: "desc" });
-  const [selected, setSelected] = useState(null);
+  const [filters, setFilters] = useState(EMPTY_FILTERS); // 검색어·종류·연도·법원 조건
+  const [sort, setSort] = useState({ key: "number", dir: "desc" }); // 기본: 사건번호 내림차순(최신 사건이 위)
+  const [selected, setSelected] = useState(null); // 미리보기 패널에 띄운 사건(null이면 닫힘)
   const closePreview = useCallback(() => setSelected(null), []);
   // 필터 패널은 기본으로 접어 두고, 펼침 여부는 다음 방문 때도 유지합니다.
+  // localStorage는 브라우저에 작은 값을 저장해 두는 곳으로, 새로고침해도 남습니다.
+  // useState에 함수를 넘기면 처음 한 번만 실행해 초기값을 정합니다.
   const [filtersOpen, setFiltersOpen] = useState(() => localStorage.getItem("casepulse.filtersOpen") === "1");
   useEffect(() => localStorage.setItem("casepulse.filtersOpen", filtersOpen ? "1" : "0"), [filtersOpen]);
   const filterCount = activeFilterCount(filters);
-  const searchRef = useRef(null);
+  const searchRef = useRef(null); // 검색창 DOM 요소. "/" 키를 누르면 여기에 포커스를 줍니다.
 
+  // App이 openCase를 바꾸면(예: 방금 등록한 사건) 그 사건의 미리보기 패널을 엽니다.
   useEffect(() => {
     if (openCase) setSelected(openCase);
   }, [openCase]);
@@ -81,10 +84,14 @@ export default function CaseListPage({ cases, error, active, onNewCase, openCase
     return () => window.removeEventListener("keydown", onKey);
   }, [active]);
 
-  const all = cases ?? [];
+  const all = cases ?? []; // 아직 불러오는 중(null)이면 빈 배열로 계산합니다.
+  // useMemo(계산, [의존값])는 의존값이 바뀔 때만 다시 계산하고, 그 외에는 이전 결과를 재사용합니다.
+  // 사건이 수백 건이라 입력할 때마다 다시 계산하지 않도록 아껴 둡니다.
+  // years: 사건에 나오는 접수 연도들(최신 연도부터). 필터의 연도 선택지로 씁니다.
   const years = useMemo(() => [...new Set(all.map((c) => c.year))].sort((a, b) => b - a), [cases]);
+  // courts: 사건이 있는 법원과 사건 수. 사건이 많은 법원부터, 같으면 이름순으로 정렬합니다(필터의 법원 선택지).
   const courts = useMemo(() => {
-    const m = new Map();
+    const m = new Map(); // 법원 ID → { id, name, count }
     for (const c of all) {
       const e = m.get(c.court.id) ?? { id: c.court.id, name: c.court.name, count: 0 };
       e.count++;
@@ -94,11 +101,14 @@ export default function CaseListPage({ cases, error, active, onNewCase, openCase
   }, [cases]);
   const filtered = useMemo(() => filterAndSort(all, filters, sort), [cases, filters, sort]);
 
+  // 열 머리글을 눌렀을 때: 같은 열을 다시 누르면 오름차순↔내림차순을 바꾸고,
+  // 다른 열을 누르면 그 열로 바꿉니다(사건번호는 내림차순, 나머지는 오름차순부터 시작).
   const onSort = (key) =>
     setSort((s) =>
       s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "number" ? "desc" : "asc" },
     );
 
+  // 상황에 따라 본문을 다르게 보여 줍니다: 오류 → 불러오는 중 → 결과 없음 → 사건 표
   let body;
   if (error) {
     body = (
@@ -191,6 +201,7 @@ export default function CaseListPage({ cases, error, active, onNewCase, openCase
                   ref={searchRef}
                   placeholder="사건번호, 사건명, 당사자, 법원, 재판부 검색"
                   value={filters.query}
+                  // {...filters, query: 새값}: 기존 필터를 복사하면서 query만 바꾼 새 객체를 만듭니다.
                   onChange={(e) => setFilters({ ...filters, query: e.target.value })}
                 />
                 <InputGroupAddon align="inline-end">
